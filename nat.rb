@@ -1,7 +1,7 @@
 require "./tun"
 
 class BaseNAT
-    attr_accessor :idle_timeout, :global_ports
+    attr_accessor :name, :idle_timeout, :global_ports
 
     class Entry
         attr_accessor :prev, :next, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port
@@ -22,7 +22,8 @@ class BaseNAT
         end
     end
 
-    def initialize()
+    def initialize(name)
+        @name = name
         @anchor = Entry.new
         @anchor.prev = @anchor
         @anchor.next = @anchor
@@ -39,7 +40,7 @@ class BaseNAT
             if global_port.nil?
                 return nil
             end
-            puts "adding mapping #{IPv4.addr_to_s(local_addr)}:#{local_port}:#{IPv4.addr_to_s(remote_addr)}:#{remote_port} using #{global_port}"
+            puts "#{name}:adding #{IPv4.addr_to_s(local_addr)}:#{local_port}:#{IPv4.addr_to_s(remote_addr)}:#{remote_port} using #{global_port}"
             entry = _insert(local_addr, local_port, global_port, remote_addr, remote_port)
         else
             entry.unlink
@@ -56,7 +57,7 @@ class BaseNAT
     def gc()
         items_before = Time.now.to_i - idle_timeout
         while @anchor.next != @anchor && @anchor.next.last_access < items_before
-            puts "removing mapping remote_port=#{@anchor.next.remote_port}, global_port=#{@anchor.next.global_port}"
+            puts "#{name}:removing #{@anchor.next.global_port}"
             _gc_entry(@anchor.next)
         end
     end
