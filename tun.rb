@@ -121,6 +121,9 @@ class IPv4 < IP
         orig_tuple
     end
 
+    def self.addr_to_s(addr)
+        addr[0].ord.to_s + '.' + addr[1].ord.to_s + '.' + addr[2].ord.to_s + '.' + addr[3].ord.to_s
+    end
 end
 
 class UDP

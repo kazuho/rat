@@ -7,11 +7,11 @@ class BaseNAT
         attr_accessor :prev, :next, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port
 
         def link(anchor)
-            last_access = Time.now.to_i
-            @anchor.prev.next = entry
-            entry.prev = @anchor.prev
-            @anchor.prev = entry
-            entry.next = @anchor
+            @last_access = Time.now.to_i
+            anchor.prev.next = self
+            self.prev = anchor.prev
+            anchor.prev = self
+            self.next = anchor
         end
 
         def unlink()
@@ -39,6 +39,7 @@ class BaseNAT
             if global_port.nil?
                 return nil
             end
+            puts "adding mapping #{IPv4.addr_to_s(local_addr)}:#{local_port}:#{IPv4.addr_to_s(remote_addr)}:#{remote_port} using #{global_port}"
             entry = _insert(local_addr, local_port, global_port, remote_addr, remote_port)
         else
             entry.unlink
@@ -54,8 +55,9 @@ class BaseNAT
 
     def gc()
         items_before = Time.now.to_i - idle_timeout
-        while @anchor.next != @anchor && @anchor.last_access < items_before
-            _gc_entry(entry)
+        while @anchor.next != @anchor && @anchor.next.last_access < items_before
+            puts "removing mapping remote_port=#{@anchor.next.remote_port}, global_port=#{@anchor.next.global_port}"
+            _gc_entry(@anchor.next)
         end
     end
 
@@ -74,8 +76,8 @@ class BaseNAT
         entry.remote_port = remote_port
 
         entry.link(@anchor)
-        @locals[local_key(local_addr, local_port, remote_addr, remote_key)] = entry
-        @remotes[remote_key(global_port, remote_addr, + remote_port)] = entry
+        @locals[local_key(local_addr, local_port, remote_addr, remote_port)] = entry
+        @remotes[remote_key(global_port, remote_addr, remote_port)] = entry
 
         entry
     end
@@ -93,11 +95,11 @@ class SymmetricNAT < BaseNAT
     end
 
     def local_key(local_addr, local_port, remote_addr, remote_port)
-        local_addr + ":" + local_port + ":" + remote_addr + ":" + remote_port
+        local_addr + ":" + local_port.to_s + ":" + remote_addr + ":" + remote_port.to_s
     end
 
     def remote_key(global_port, remote_addr, remote_port)
-       global_port + "+" + remote_addr + ":" + remote_port
+       global_port.to_s + ":" + remote_addr + ":" + remote_port.to_s
     end
 end
 
@@ -126,12 +128,16 @@ class ConeNAT < BaseNAT
     end
 end
 
-GLOBAL_ADDR = "\xa\1\2\4"
+GLOBAL_ADDR = "\xc0\xa8\x5b\xc8".b
 tcp_table = SymmetricNAT.new
 tcp_table.idle_timeout = 30
-tcp_table.global_ports.push *(1024..65535)
+tcp_table.global_ports.push *(9000 .. 9100)
 
-tun = Tun.new("tap-e")
+def is_egress(packet)
+    packet.l3.dest_addr != GLOBAL_ADDR
+end
+
+tun = Tun.new("rat")
 
 loop do
     packet = tun.read()
@@ -149,7 +155,7 @@ loop do
                     tun.write(packet)
                 end
             else
-                tuple = tcp._table.lookup_ingress(packet.l4.dest_port, packet.l3.src_addr, packet.l3.src_port)
+                tuple = tcp_table.lookup_ingress(packet.l4.dest_port, packet.l3.src_addr, packet.l4.src_port)
                 if tuple
                     packet.l3.dest_addr = tuple.local_addr
                     packet.l4.dest_port = tuple.local_port
