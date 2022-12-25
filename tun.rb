@@ -203,6 +203,9 @@ class ICMP
 
     def _apply(packet, orig_l3_tuple)
         # ICMP does not use pseudo headers
+        packet.encode_u16(packet.l4_start + 2, 0)
+        @checksum = IP.checksum(packet.bytes, packet.l4_start, packet.bytes.length - packet.l4_start)
+        packet.encode_u16(packet.l4_start + 2, @checksum)
     end
 end
 
