@@ -106,26 +106,27 @@ end
 
 class ConeNAT < BaseNAT
     def empty_port(remote_addr, remote_port)
+        gc
         if @empty_ports.nil?
-            empty_ports = global_ports.dup
+            @empty_ports = global_ports.dup
         end
-        if empty_ports.empty?
+        if @empty_ports.empty?
             return nil
         end
-        empty_ports.shift
+        @empty_ports.shift
     end
 
     def _gc_entry(entry)
         super(entry)
-        empty_ports.push entry.global_port
+        @empty_ports.push entry.global_port
     end
 
     def local_key(local_addr, local_port, remote_addr, remote_port)
-        local_addr + ":" + local_port
+        local_addr + ":" + local_port.to_s
     end
 
     def remote_key(global_port, remote_addr, remote_port)
-       global_port
+       global_port.to_s
     end
 end
 
