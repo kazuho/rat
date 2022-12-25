@@ -149,7 +149,17 @@ class UDP
     end
 
     def _apply(packet, orig_l3_tuple)
-        @checksum = IP.checksum_adjust(@checksum, orig_l3_tuple, packet.l3.tuple)
+        bytes = packet.bytes
+        l4_start = packet.l4_start
+
+        orig_bytes = orig_l3_tuple + bytes[l4_start .. l4_start + 3]
+
+        packet.encode_u16(l4_start, @src_port)
+        packet.encode_u16(l4_start + 2, @dest_port)
+
+        new_bytes = packet.l3.tuple + bytes[l4_start .. l4_start + 3]
+
+        @checksum = IP.checksum_adjust(@checksum, orig_bytes, new_bytes)
         packet.encode_u16(packet.l4_start + 6, @checksum)
     end
 end
@@ -180,7 +190,17 @@ class TCP
     end
 
     def _apply(packet, orig_l3_tuple)
-        @checksum = IP.checksum_adjust(@checksum, orig_l3_tuple, packet.l3.tuple)
+        bytes = packet.bytes
+        l4_start = packet.l4_start
+
+        orig_bytes = orig_l3_tuple + bytes[l4_start .. l4_start + 3]
+
+        packet.encode_u16(l4_start, @src_port)
+        packet.encode_u16(l4_start + 2, @dest_port)
+
+        new_bytes = packet.l3.tuple + bytes[l4_start .. l4_start + 3]
+
+        @checksum = IP.checksum_adjust(@checksum, orig_bytes, new_bytes)
         packet.encode_u16(packet.l4_start + 16, @checksum)
     end
 end
