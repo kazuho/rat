@@ -11,6 +11,8 @@ class Packet
                 self.l4 = UDP.parse(self)
             elsif self.l3.proto == TCP::PROTOCOL_ID
                 self.l4 = TCP.parse(self)
+            elsif self.l3.proto == ICMP::PROTOCOL_ID
+                self.l4 = ICMP.parse(self)
             end
         end
     end
@@ -175,6 +177,32 @@ class TCP
     def _apply(packet, orig_l3_tuple)
         @checksum = IP.checksum_adjust(@checksum, orig_l3_tuple, packet.l3.tuple)
         packet.encode_u16(packet.l4_start + 16, @checksum)
+    end
+end
+
+class ICMP
+    PROTOCOL_ID = 1
+
+    attr_reader :type, :code, :checksum
+
+    def _parse(packet)
+        bytes = packet.bytes
+        off = packet.l4_start
+
+        return nil if bytes.length - off < 8
+        @type = bytes[off].ord
+        @code = bytes[off + 1].ord
+        @checksum = packet.decode_u16(off + 2)
+
+        self
+    end
+
+    def self.parse(packet)
+        ICMP.new._parse(packet)
+    end
+
+    def _apply(packet, orig_l3_tuple)
+        # ICMP does not use pseudo headers
     end
 end
 
