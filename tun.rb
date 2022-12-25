@@ -9,6 +9,8 @@ class Packet
         if self.l3
             if self.l3.proto == UDP::PROTOCOL_ID
                 self.l4 = UDP.parse(self)
+            elsif self.l3.proto == TCP::PROTOCOL_ID
+                self.l4 = TCP.parse(self)
             end
         end
     end
@@ -143,6 +145,36 @@ class UDP
     def _apply(packet, orig_l3_tuple)
         @checksum = IP.checksum_adjust(@checksum, orig_l3_tuple, packet.l3.tuple)
         packet.encode_u16(packet.l4_start + 6, @checksum)
+    end
+end
+
+class TCP
+    PROTOCOL_ID = 6
+
+    attr_reader :src_port, :dst_port, :checksum, :flags
+
+    def _parse(packet)
+        off = packet.l4_start
+
+        return nil if packet.bytes.length - off < 20
+        @src_port = packet.decode_u16(off)
+        @dst_port = packet.decode_u16(off + 2)
+        # seq 4 bytes
+        # ack 4 bytes
+        @flags = packet.decode_u16(off + 12)
+        # winsz 2 bytes
+        @checksum = packet.decode_u16(off + 16)
+
+        self
+    end
+
+    def self.parse(packet)
+        TCP.new._parse(packet)
+    end
+
+    def _apply(packet, orig_l3_tuple)
+        @checksum = IP.checksum_adjust(@checksum, orig_l3_tuple, packet.l3.tuple)
+        packet.encode_u16(packet.l4_start + 16, @checksum)
     end
 end
 
