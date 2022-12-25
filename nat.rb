@@ -131,9 +131,12 @@ class ConeNAT < BaseNAT
 end
 
 GLOBAL_ADDR = "\xc0\xa8\x5b\xc8".b
-tcp_table = SymmetricNAT.new
-tcp_table.idle_timeout = 30
-tcp_table.global_ports.push *(9000 .. 9100)
+tcp_table = SymmetricNAT.new("tcp")
+tcp_table.idle_timeout = 120
+tcp_table.global_ports.push *(9000 .. 9099)
+udp_table = ConeNAT.new("udp")
+udp_table.idle_timeout = 30
+udp_table.global_ports.push *(9000 .. 9099)
 
 def is_egress(packet)
     packet.l3.dest_addr != GLOBAL_ADDR
@@ -145,9 +148,13 @@ loop do
     packet = tun.read()
     if packet.l4
         if packet.l4.is_a?(TCP)
+            table = tcp_table
+        elsif packet.l4.is_a?(UDP)
+            table = udp_table
+        end
+        if table
             if is_egress(packet)
-                global_port = tcp_table.lookup_egress(packet.l3.src_addr, packet.l4.src_port, packet.l3.dest_addr,
-                                                      packet.l4.dest_port)
+                global_port = table.lookup_egress(packet.l3.src_addr, packet.l4.src_port, packet.l3.dest_addr, packet.l4.dest_port)
                 if global_port.nil?
                     puts "no empty port"
                 else
@@ -157,7 +164,7 @@ loop do
                     tun.write(packet)
                 end
             else
-                tuple = tcp_table.lookup_ingress(packet.l4.dest_port, packet.l3.src_addr, packet.l4.src_port)
+                tuple = table.lookup_ingress(packet.l4.dest_port, packet.l3.src_addr, packet.l4.src_port)
                 if tuple
                     packet.l3.dest_addr = tuple.local_addr
                     packet.l4.dest_port = tuple.local_port
