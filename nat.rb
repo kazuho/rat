@@ -1,6 +1,6 @@
 require "./tun"
 
-class NATTable
+class BaseNAT
     attr_accessor :idle_timeout, :global_ports
 
     class Entry
@@ -36,6 +36,9 @@ class NATTable
 
         if entry.nil?
             global_port = empty_port(remote_addr, remote_port)
+            if global_port.nil?
+                return nil
+            end
             entry = _insert(local_addr, local_port, global_port, remote_addr, remote_port)
         else
             entry.unlink
@@ -49,23 +52,17 @@ class NATTable
         @remotes[remote_key(global_port, remote_addr, remote_port)]
     end
 
-    def empty_port(remote_addr, remote_port)
-        gc
-        loop do
-            test_port = @global_ports[rand(@global_ports.length)]
-            unless @remotes[remote_key(test_port, remote_addr, remote_port)]
-                return test_port
-            end
-        end
-    end
-
     def gc()
         items_before = Time.now.to_i - idle_timeout
         while @anchor.next != @anchor && @anchor.last_access < items_before
-            entry.unlink
-            @locals.delete(local_key(entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port))
-            @remotes.delete(remote_key(entry.global_port, entry.remote_addr, entry.remote_port))
+            _gc_entry(entry)
         end
+    end
+
+    def _gc_entry(entry)
+        entry.unlink
+        @locals.delete(local_key(entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port))
+        @remotes.delete(remote_key(entry.global_port, entry.remote_addr, entry.remote_port))
     end
 
     def _insert(local_addr, local_port, global_port, remote_addr, remote_port)
@@ -82,6 +79,18 @@ class NATTable
 
         entry
     end
+end
+
+class SymmetricNAT < BaseNAT
+    def empty_port(remote_addr, remote_port)
+        gc
+        loop do
+            test_port = @global_ports[rand(@global_ports.length)]
+            unless @remotes[remote_key(test_port, remote_addr, remote_port)]
+                return test_port
+            end
+        end
+    end
 
     def local_key(local_addr, local_port, remote_addr, remote_port)
         local_addr + ":" + local_port + ":" + remote_addr + ":" + remote_port
@@ -92,8 +101,33 @@ class NATTable
     end
 end
 
+class ConeNAT < BaseNAT
+    def empty_port(remote_addr, remote_port)
+        if @empty_ports.nil?
+            empty_ports = global_ports.dup
+        end
+        if empty_ports.empty?
+            return nil
+        end
+        empty_ports.shift
+    end
+
+    def _gc_entry(entry)
+        super(entry)
+        empty_ports.push entry.global_port
+    end
+
+    def local_key(local_addr, local_port, remote_addr, remote_port)
+        local_addr + ":" + local_port
+    end
+
+    def remote_key(global_port, remote_addr, remote_port)
+       global_port
+    end
+end
+
 GLOBAL_ADDR = "\xa\1\2\4"
-tcp_table = NATTable.new
+tcp_table = SymmetricNAT.new
 tcp_table.idle_timeout = 30
 tcp_table.global_ports.push *(1024..65535)
 
@@ -106,10 +140,14 @@ loop do
             if is_egress(packet)
                 global_port = tcp_table.lookup_egress(packet.l3.src_addr, packet.l4.src_port, packet.l3.dest_addr,
                                                       packet.l4.dest_port)
-                packet.l3.src_addr = GLOBAL_ADDR
-                packet.l4.src_port = global_port
-                packet.apply
-                tun.write(packet)
+                if global_port.nil?
+                    puts "no empty port"
+                else
+                    packet.l3.src_addr = GLOBAL_ADDR
+                    packet.l4.src_port = global_port
+                    packet.apply
+                    tun.write(packet)
+                end
             else
                 tuple = tcp._table.lookup_ingress(packet.l4.dest_port, packet.l3.src_addr, packet.l3.src_port)
                 if tuple
