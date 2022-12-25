@@ -1,3 +1,9 @@
+# How to setup:
+# sudo ip tuntap add dev tap-e mode tun user <username>
+# sudo ip addr add 10.1.2.3/32 dev tap-e
+# sudo ip link set tap-e up
+# sudo ip route add 10.1.2.0/24 via 10.1.2.3
+
 require "./tun"
 
 TRUE_ADDR = "\xa\1\2\3".b
