@@ -126,14 +126,15 @@ end
 class UDP
     PROTOCOL_ID = 17
 
-    attr_reader :src_port, :dst_port, :checksum
+    attr_accessor :src_port, :dest_port
+    attr_reader :checksum
 
     def _parse(packet)
         off = packet.l4_start
 
         return nil if packet.bytes.length - off < 8
         @src_port = packet.decode_u16(off)
-        @dst_port = packet.decode_u16(off + 2)
+        @dest_port = packet.decode_u16(off + 2)
         # length?
         @checksum = packet.decode_u16(off + 6)
 
@@ -153,14 +154,15 @@ end
 class TCP
     PROTOCOL_ID = 6
 
-    attr_reader :src_port, :dst_port, :checksum, :flags
+    attr_accessor :src_port, :dest_port
+    attr_reader :flags, :checksum
 
     def _parse(packet)
         off = packet.l4_start
 
         return nil if packet.bytes.length - off < 20
         @src_port = packet.decode_u16(off)
-        @dst_port = packet.decode_u16(off + 2)
+        @dest_port = packet.decode_u16(off + 2)
         # seq 4 bytes
         # ack 4 bytes
         @flags = packet.decode_u16(off + 12)
@@ -189,7 +191,6 @@ class ICMP
         bytes = packet.bytes
         off = packet.l4_start
 
-        return nil if bytes.length - off < 8
         @type = bytes[off].ord
         @code = bytes[off + 1].ord
         @checksum = packet.decode_u16(off + 2)
@@ -198,11 +199,68 @@ class ICMP
     end
 
     def self.parse(packet)
-        ICMP.new._parse(packet)
+        bytes = packet.bytes
+        off = packet.l4_start
+
+        return nil if bytes.length - off < 8
+
+        type = bytes[off].ord
+        if type == ICMPDestUnreach::TYPE
+            icmp = ICMPDestUnreach.new
+        else
+            icmp = ICMP.new
+        end
+
+        icmp._parse(packet)
     end
 
     def _apply(packet, orig_l3_tuple)
         # ICMP does not use pseudo headers
+    end
+end
+
+class ICMPDestUnreach < ICMP
+    TYPE = 3
+
+    attr_reader :orig_proto
+    attr_accessor :orig_src_addr, :orig_dest_addr, :orig_src_port, :orig_dest_port
+
+    def _parse(packet)
+        if super(packet).nil?
+            return nil
+        end
+
+        @orig_packet = Packet.new(packet.bytes[packet.l4_start + 8 ..])
+        if @orig_packet.nil?
+            return nil
+        end
+
+        if @orig_packet.l4.nil?
+            puts "FIXME DestUnreach does not fully contain original L4 header? That's allowed in spec"
+            return nil
+        end
+
+        @orig_proto = @orig_packet.l3.proto
+        @orig_src_addr = @orig_packet.l3.src_addr
+        @orig_dest_addr = @orig_packet.l3.dest_addr
+        @orig_src_port = @orig_packet.decode_u16(@orig_packet.l4_start)
+        @orig_dest_port = @orig_packet.decode_u16(@orig_packet.l4_start + 2)
+
+        self
+    end
+
+    def _apply(packet, orig_l3_tuple)
+        # update 4 tuple of orig_packet
+        @orig_packet.l3.src_addr = @orig_src_addr
+        @orig_packet.l3.dest_addr = @orig_dest_addr
+        @orig_packet.l4.src_port = @orig_src_port
+        @orig_packet.l4.dest_port = @orig_dest_port
+        @orig_packet.apply
+
+        # overwrite packet image with orig packet being built
+        packet.bytes[packet.l4_start + 8 ..] = @orig_packet.bytes
+
+        # recalculate checksum
         packet.encode_u16(packet.l4_start + 2, 0)
         @checksum = IP.checksum(packet.bytes, packet.l4_start, packet.bytes.length - packet.l4_start)
         packet.encode_u16(packet.l4_start + 2, @checksum)

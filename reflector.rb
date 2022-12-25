@@ -16,6 +16,10 @@ loop do
         if packet.l3.src_addr == TRUE_ADDR and packet.l3.dest_addr == FAKE_ADDR
             packet.l3.src_addr = FAKE_ADDR
             packet.l3.dest_addr = TRUE_ADDR
+            if packet.l4.is_a?(ICMPDestUnreach)
+                packet.l4.orig_src_addr = TRUE_ADDR
+                packet.l4.orig_dest_addr = FAKE_ADDR
+            end
             packet.apply
             tun.write(packet)
         end
