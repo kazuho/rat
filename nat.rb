@@ -172,6 +172,8 @@ loop do
                     packet.l4.dest_port = tuple.local_port
                     packet.apply
                     tun.write(packet)
+                else
+                    puts "#{table.name}:drop ingress to port #{packet.l4.dest_port}"
                 end
             end
         end
