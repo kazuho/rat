@@ -87,12 +87,13 @@ end
 class SymmetricNAT < BaseNAT
     def empty_port(remote_addr, remote_port)
         gc
-        loop do
+        20.times do
             test_port = @global_ports[rand(@global_ports.length)]
             unless @remotes[remote_key(test_port, remote_addr, remote_port)]
                 return test_port
             end
         end
+        nil
     end
 
     def local_key(local_addr, local_port, remote_addr, remote_port)
@@ -156,7 +157,7 @@ loop do
             if is_egress(packet)
                 global_port = table.lookup_egress(packet.l3.src_addr, packet.l4.src_port, packet.l3.dest_addr, packet.l4.dest_port)
                 if global_port.nil?
-                    puts "no empty port"
+                    puts "#{table.name}:no empty port"
                 else
                     packet.l3.src_addr = GLOBAL_ADDR
                     packet.l4.src_port = global_port
