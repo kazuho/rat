@@ -40,8 +40,8 @@ class BaseNAT
             if global_port.nil?
                 return nil
             end
-            puts "#{name}:adding #{IPv4.addr_to_s(local_addr)}:#{local_port}:#{IPv4.addr_to_s(remote_addr)}:#{remote_port} using #{global_port}"
             entry = _insert(local_addr, local_port, global_port, remote_addr, remote_port)
+            puts "#{name}:adding #{IPv4.addr_to_s(local_addr)}:#{local_port}:#{IPv4.addr_to_s(remote_addr)}:#{remote_port} using #{global_port}, total #{@locals.size}"
         else
             entry.unlink
             entry.link(@anchor)
@@ -57,8 +57,9 @@ class BaseNAT
     def gc()
         items_before = Time.now.to_i - idle_timeout
         while @anchor.next != @anchor && @anchor.next.last_access < items_before
-            puts "#{name}:removing #{@anchor.next.global_port}"
-            _gc_entry(@anchor.next)
+            entry = @anchor.next
+            _gc_entry(entry)
+            puts "#{name}:removing #{entry.global_port}, total #{@locals.size}"
         end
     end
 
