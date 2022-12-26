@@ -132,13 +132,13 @@ class ConeNAT < BaseNAT
     end
 end
 
-GLOBAL_ADDR = "\xc0\xa8\x5b\xc8".b
+GLOBAL_ADDR = "\xc0\xa8\x0\x89".b
 $tcp_table = SymmetricNAT.new("tcp")
 $tcp_table.idle_timeout = 300
 $tcp_table.global_ports.push *(9000 .. 9099)
 $udp_table = ConeNAT.new("udp")
 $udp_table.idle_timeout = 30
-$udp_table.global_ports.push *(9000 .. 9099)
+$udp_table.global_ports.push *(9000 .. 9999)
 
 def is_egress(packet)
     packet.l3.dest_addr != GLOBAL_ADDR
