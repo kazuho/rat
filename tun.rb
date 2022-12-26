@@ -39,13 +39,11 @@ class IP
     def self.checksum(bytes, from = nil, len = nil)
         from = 0 if from.nil?
         len = bytes.length - from if len.nil?
+        to = from + len - 1
 
-        sum = 0
-        for i in 0 .. len / 2 - 1 do
-            sum += bytes[from + i * 2].ord * 256 + bytes[from + i * 2 + 1].ord
-        end
+        sum = bytes[from .. to].unpack("n*").sum
         if len % 2 != 0
-            sum += bytes[from + len - 1].ord * 256
+            sum += bytes[to].ord * 256
         end
         ~((sum >> 16) + sum) & 0xffff
     end
@@ -53,17 +51,15 @@ class IP
     # fom RFC 3022 4.2
     def self.checksum_adjust(sum, old_bytes, new_bytes)
         sum = ~sum & 0xffff;
-        for i in 0 .. old_bytes.length / 2 - 1
-            old = old_bytes[i * 2].ord * 256 + old_bytes[i * 2 + 1].ord;
-            sum -= old;
+        for u16 in old_bytes.unpack("n*")
+            sum -= u16;
             if sum <= 0
                 sum -= 1
                 sum &= 0xffff
             end
         end
-        for i in 0 .. new_bytes.length / 2 - 1
-            n = new_bytes[i * 2].ord * 256 + new_bytes[i * 2 + 1].ord;
-            sum += n;
+        for u16 in new_bytes.unpack("n*")
+            sum += u16;
             if sum >= 0x10000
                 sum += 1
                 sum &= 0xffff
