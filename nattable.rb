@@ -96,11 +96,11 @@ class SymmetricNATTable < NATTable
     end
 
     def local_key(local_addr, local_port, remote_addr, remote_port)
-        local_addr + ":" + local_port.to_s + ":" + remote_addr + ":" + remote_port.to_s
+        local_addr + [local_port].pack("n") + remote_addr + [remote_port].pack("n")
     end
 
     def remote_key(global_port, remote_addr, remote_port)
-       global_port.to_s + ":" + remote_addr + ":" + remote_port.to_s
+       [global_port].pack("n") + remote_addr + [remote_port].pack("n")
     end
 end
 
@@ -122,10 +122,10 @@ class ConeNATTable < NATTable
     end
 
     def local_key(local_addr, local_port, remote_addr, remote_port)
-        local_addr + ":" + local_port.to_s
+        local_addr + [local_port].pack("n")
     end
 
     def remote_key(global_port, remote_addr, remote_port)
-       global_port.to_s
+       [global_port].pack("n")
     end
 end
