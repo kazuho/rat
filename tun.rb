@@ -34,7 +34,7 @@ end
 
 class IP
     attr_accessor :src_addr, :dest_addr
-    attr_reader :checksum, :proto, :ttl
+    attr_reader :proto
 
     def self.checksum(bytes, from = nil, len = nil)
         from = 0 if from.nil?
@@ -85,9 +85,9 @@ class IPv4 < IP
         # totlen?
         # ignore identification
         return nil if packet.decode_u16(6) & 0xbfff != 0 # ignore fragments
-        @ttl = bytes[8].ord
+        # ttl: 8
         @proto = bytes[9].ord
-        @checksum = packet.decode_u16(10)
+        # checksum 10..11
         @src_addr = bytes[12..15]
         @dest_addr = bytes[16..19]
 
@@ -108,15 +108,15 @@ class IPv4 < IP
 
         orig_tuple = bytes[12..19]
 
-        @ttl -= 1
-        bytes[8] = @ttl.chr
+        # decrement TTL
+        bytes[8] = (bytes[8].ord - 1).chr
 
         bytes[12..15] = @src_addr
         bytes[16..19] = @dest_addr
 
         packet.encode_u16(10, 0)
-        @checksum = IP.checksum(bytes, 0, packet.l4_start)
-        packet.encode_u16(10, @checksum)
+        checksum = IP.checksum(bytes, 0, packet.l4_start)
+        packet.encode_u16(10, checksum)
 
         orig_tuple
     end
@@ -130,7 +130,6 @@ class UDP
     PROTOCOL_ID = 17
 
     attr_accessor :src_port, :dest_port
-    attr_reader :checksum
 
     def _parse(packet)
         off = packet.l4_start
@@ -138,8 +137,8 @@ class UDP
         return nil if packet.bytes.length - off < 8
         @src_port = packet.decode_u16(off)
         @dest_port = packet.decode_u16(off + 2)
-        # length?
-        @checksum = packet.decode_u16(off + 6)
+        # length 2 bytes
+        # checksum 2 bytes
 
         self
     end
@@ -159,8 +158,9 @@ class UDP
 
         new_bytes = packet.l3.tuple + bytes[l4_start .. l4_start + 3]
 
-        @checksum = IP.checksum_adjust(@checksum, orig_bytes, new_bytes)
-        packet.encode_u16(packet.l4_start + 6, @checksum)
+        checksum = packet.decode_u16(packet.l4_start + 6)
+        checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
+        packet.encode_u16(packet.l4_start + 6, checksum)
     end
 end
 
@@ -168,7 +168,7 @@ class TCP
     PROTOCOL_ID = 6
 
     attr_accessor :src_port, :dest_port
-    attr_reader :flags, :checksum
+    attr_reader :flags
 
     def _parse(packet)
         off = packet.l4_start
@@ -180,7 +180,7 @@ class TCP
         # ack 4 bytes
         @flags = packet.decode_u16(off + 12)
         # winsz 2 bytes
-        @checksum = packet.decode_u16(off + 16)
+        # checksum 2 bytes
 
         self
     end
@@ -200,8 +200,9 @@ class TCP
 
         new_bytes = packet.l3.tuple + bytes[l4_start .. l4_start + 3]
 
-        @checksum = IP.checksum_adjust(@checksum, orig_bytes, new_bytes)
-        packet.encode_u16(packet.l4_start + 16, @checksum)
+        checksum = packet.decode_u16(l4_start + 16)
+        checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
+        packet.encode_u16(packet.l4_start + 16, checksum)
     end
 end
 
