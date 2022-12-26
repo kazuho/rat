@@ -23,10 +23,11 @@ class Packet
     end
 
     def decode_u16(off)
-        return @bytes[off].ord * 256 + @bytes[off + 1].ord
+        @bytes[off .. off + 1].unpack1("n")
     end
 
     def encode_u16(off, v)
+        # this seems faster than pack-then-replace
         @bytes[off] = ((v >> 8) & 0xff).chr
         @bytes[off + 1] = (v & 0xff).chr
     end
