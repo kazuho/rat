@@ -1,24 +1,62 @@
 require "socket"
 
-class Packet
-    attr_accessor :bytes, :l3, :l4, :l4_start
+class IP
+    attr_accessor :bytes, :proto, :src_addr, :dest_addr, :l4_start, :l4
 
     def initialize(bytes)
-        self.bytes = bytes
-        self.l3 = IPv4.parse(self)
-        if self.l3
-            if self.l3.proto == UDP::PROTOCOL_ID
-                self.l4 = UDP.parse(self)
-            elsif self.l3.proto == TCP::PROTOCOL_ID
-                self.l4 = TCP.parse(self)
-            elsif self.l3.proto == ICMP::PROTOCOL_ID
-                self.l4 = ICMP.parse(self)
-            end
+        @bytes = bytes
+    end
+
+    def _parse()
+        bytes = @bytes
+        return nil if bytes.length < 20
+        return nil if bytes[0].ord != 0x45
+        # tos?
+        # totlen?
+        # ignore identification
+        return nil if decode_u16(6) & 0xbfff != 0 # ignore fragments
+        # ttl: 8
+        @proto = bytes[9].ord
+        # checksum 10..11
+        @src_addr = bytes[12..15]
+        @dest_addr = bytes[16..19]
+
+        @l4_start = 20
+
+        if @proto == UDP::PROTOCOL_ID
+            self.l4 = UDP.parse(self)
+        elsif @proto == TCP::PROTOCOL_ID
+            self.l4 = TCP.parse(self)
+        elsif @proto == ICMP::PROTOCOL_ID
+            self.l4 = ICMP.parse(self)
         end
+
+        self
+    end
+
+    def self.parse(bytes)
+        IP.new(bytes)._parse
+    end
+
+    def tuple()
+        @src_addr + @dest_addr
     end
 
     def apply()
-        orig_l3_tuple = l3.apply(self)
+        bytes = @bytes
+
+        orig_l3_tuple = bytes[12..19]
+
+        # decrement TTL
+        bytes[8] = (bytes[8].ord - 1).chr
+
+        bytes[12..15] = @src_addr
+        bytes[16..19] = @dest_addr
+
+        encode_u16(10, 0)
+        checksum = IP.checksum(bytes, 0, l4_start)
+        encode_u16(10, checksum)
+
         l4.apply(self, orig_l3_tuple)
     end
 
@@ -27,7 +65,7 @@ class Packet
     end
 
     def encode_u16(off, v)
-        Packet.encode_u16(@bytes, off, v)
+        IP.encode_u16(@bytes, off, v)
     end
 
     def self.encode_u16(bytes, off, v)
@@ -35,11 +73,6 @@ class Packet
         bytes[off] = ((v >> 8) & 0xff).chr
         bytes[off + 1] = (v & 0xff).chr
     end
-end
-
-class IP
-    attr_accessor :src_addr, :dest_addr
-    attr_reader :proto
 
     def self.checksum(bytes, from = nil, len = nil)
         from = 0 if from.nil?
@@ -72,55 +105,6 @@ class IP
         end
         ~sum & 0xffff
     end
-end
-
-class IPv4 < IP
-    PROTOCOL_ID = 0x0800
-
-    def _parse(packet)
-        bytes = packet.bytes
-
-        return nil if bytes.length < 20
-        return nil if bytes[0].ord != 0x45
-        # tos?
-        # totlen?
-        # ignore identification
-        return nil if packet.decode_u16(6) & 0xbfff != 0 # ignore fragments
-        # ttl: 8
-        @proto = bytes[9].ord
-        # checksum 10..11
-        @src_addr = bytes[12..15]
-        @dest_addr = bytes[16..19]
-
-        packet.l4_start = 20
-        self
-    end
-
-    def self.parse(packet)
-        IPv4.new._parse(packet)
-    end
-
-    def tuple()
-        @src_addr + @dest_addr
-    end
-
-    def apply(packet)
-        bytes = packet.bytes
-
-        orig_tuple = bytes[12..19]
-
-        # decrement TTL
-        bytes[8] = (bytes[8].ord - 1).chr
-
-        bytes[12..15] = @src_addr
-        bytes[16..19] = @dest_addr
-
-        packet.encode_u16(10, 0)
-        checksum = IP.checksum(bytes, 0, packet.l4_start)
-        packet.encode_u16(10, checksum)
-
-        orig_tuple
-    end
 
     def self.addr_to_s(addr)
         addr.unpack("C4").join(".")
@@ -135,7 +119,7 @@ class TCPUDP
     end
 
     def src_port=(n)
-        Packet.encode_u16(@tuple, 0, n)
+        IP.encode_u16(@tuple, 0, n)
     end
 
     def dest_port()
@@ -143,7 +127,7 @@ class TCPUDP
     end
 
     def dest_port=(n)
-        Packet.encode_u16(@tuple, 2, n)
+        IP.encode_u16(@tuple, 2, n)
     end
 
     def _parse(packet, min_len)
@@ -162,7 +146,7 @@ class TCPUDP
 
         orig_bytes = orig_l3_tuple + bytes[l4_start .. l4_start + 3]
         bytes[l4_start .. l4_start + 3] = @tuple
-        new_bytes = packet.l3.tuple + @tuple
+        new_bytes = packet.tuple + @tuple
 
         checksum = packet.decode_u16(l4_start + checksum_offset)
         checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
@@ -252,9 +236,9 @@ class ICMPDestUnreach < ICMP
             return nil
         end
 
-        @orig_proto = @orig_packet.l3.proto
-        @orig_src_addr = @orig_packet.l3.src_addr
-        @orig_dest_addr = @orig_packet.l3.dest_addr
+        @orig_proto = @orig_packet.proto
+        @orig_src_addr = @orig_packet.src_addr
+        @orig_dest_addr = @orig_packet.dest_addr
         @orig_src_port = @orig_packet.decode_u16(@orig_packet.l4_start)
         @orig_dest_port = @orig_packet.decode_u16(@orig_packet.l4_start + 2)
 
@@ -263,8 +247,8 @@ class ICMPDestUnreach < ICMP
 
     def _apply(packet, orig_l3_tuple)
         # update 4 tuple of orig_packet
-        @orig_packet.l3.src_addr = @orig_src_addr
-        @orig_packet.l3.dest_addr = @orig_dest_addr
+        @orig_packet.src_addr = @orig_src_addr
+        @orig_packet.dest_addr = @orig_dest_addr
         @orig_packet.l4.src_port = @orig_src_port
         @orig_packet.l4.dest_port = @orig_dest_port
         @orig_packet.apply
@@ -293,7 +277,7 @@ class Tun
 
     def read()
         bytes = @tundev.sysread(1500)
-        return Packet.new(bytes)
+        return IP.parse(bytes)
     end
 
     def write(packet)

@@ -10,7 +10,7 @@ $udp_table.idle_timeout = 30
 $udp_table.global_ports.push *(9000 .. 9999)
 
 def is_egress(packet)
-    packet.l3.dest_addr != GLOBAL_ADDR
+    packet.dest_addr != GLOBAL_ADDR
 end
 
 $tun = Tun.new("rat")
@@ -25,19 +25,19 @@ def doit()
         end
         if table
             if is_egress(packet)
-                global_port = table.lookup_egress(packet.l3, packet.l4)
+                global_port = table.lookup_egress(packet)
                 if global_port.nil?
                     puts "#{table.name}:no empty port"
                 else
-                    packet.l3.src_addr = GLOBAL_ADDR
+                    packet.src_addr = GLOBAL_ADDR
                     packet.l4.src_port = global_port
                     packet.apply
                     $tun.write(packet)
                 end
             else
-                tuple = table.lookup_ingress(packet.l3, packet.l4)
+                tuple = table.lookup_ingress(packet)
                 if tuple
-                    packet.l3.dest_addr = tuple.local_addr
+                    packet.dest_addr = tuple.local_addr
                     packet.l4.dest_port = tuple.local_port
                     packet.apply
                     $tun.write(packet)
