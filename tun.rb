@@ -7,7 +7,7 @@ class IP
         @bytes = bytes
     end
 
-    def _parse()
+    def _parse(allow_partial)
         bytes = @bytes
         return nil if bytes.length < 20
         return nil if bytes.getbyte(0) != 0x45
@@ -24,9 +24,9 @@ class IP
         @l4_start = 20
 
         if @proto == UDP::PROTOCOL_ID
-            self.l4 = UDP.parse(self)
+            self.l4 = UDP.parse(self, allow_partial)
         elsif @proto == TCP::PROTOCOL_ID
-            self.l4 = TCP.parse(self)
+            self.l4 = TCP.parse(self, allow_partial)
         elsif @proto == ICMP::PROTOCOL_ID
             self.l4 = ICMP.parse(self)
         end
@@ -34,8 +34,8 @@ class IP
         self
     end
 
-    def self.parse(bytes)
-        IP.new(bytes)._parse
+    def self.parse(bytes, allow_partial = false)
+        IP.new(bytes)._parse(allow_partial)
     end
 
     def tuple()
@@ -148,17 +148,19 @@ class TCPUDP
         bytes[l4_start .. l4_start + 3] = @tuple
         new_bytes = packet.tuple + @tuple
 
-        checksum = packet.decode_u16(l4_start + checksum_offset)
-        checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
-        packet.encode_u16(l4_start + checksum_offset, checksum)
+        if bytes.length >= l4_start + checksum_offset + 2
+            checksum = packet.decode_u16(l4_start + checksum_offset)
+            checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
+            packet.encode_u16(l4_start + checksum_offset, checksum)
+        end
     end
 end
 
 class UDP < TCPUDP
     PROTOCOL_ID = 17
 
-    def self.parse(packet)
-        UDP.new._parse(packet, 8)
+    def self.parse(packet, allow_partial)
+        UDP.new._parse(packet, allow_partial ? 4 : 8)
     end
 
     def apply(packet, orig_l3_tuple)
@@ -169,8 +171,8 @@ end
 class TCP < TCPUDP
     PROTOCOL_ID = 6
 
-    def self.parse(packet)
-        TCP.new._parse(packet, 20)
+    def self.parse(packet, allow_partial)
+        TCP.new._parse(packet, allow_partial ? 4 : 20)
     end
 
     def apply(packet, orig_l3_tuple)
@@ -226,13 +228,8 @@ class ICMPDestUnreach < ICMP
             return nil
         end
 
-        @orig_packet = IP.new(packet.bytes[packet.l4_start + 8 ..])
-        if @orig_packet.nil?
-            return nil
-        end
-
-        if @orig_packet.l4.nil?
-            puts "FIXME DestUnreach does not fully contain original L4 header? That's allowed in spec"
+        @orig_packet = IP.parse(packet.bytes[packet.l4_start + 8 ..], true)
+        if @orig_packet.nil? || @orig_packet.l4.nil?
             return nil
         end
 
@@ -245,7 +242,7 @@ class ICMPDestUnreach < ICMP
         self
     end
 
-    def _apply(packet, orig_l3_tuple)
+    def apply(packet, orig_l3_tuple)
         # update 4 tuple of orig_packet
         @orig_packet.src_addr = @orig_src_addr
         @orig_packet.dest_addr = @orig_dest_addr
