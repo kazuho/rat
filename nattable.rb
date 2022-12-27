@@ -61,6 +61,18 @@ class NATTable
         @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)]
     end
 
+    def size()
+        @locals.size
+    end
+
+    def each()
+        entry = @anchor.next
+        while entry != @anchor
+            yield entry
+            entry = entry.next
+        end
+    end
+
     def gc()
         items_before = Time.now.to_i - idle_timeout
         while @anchor.next != @anchor && @anchor.next.last_access < items_before

@@ -1,3 +1,5 @@
+require "rackup"
+require "webrick"
 require "./tun"
 require "./nat"
 require "./nattable"
@@ -18,6 +20,30 @@ nat.icmp_echo_table = SymmetricNATTable.new("icmp-echo")
 nat.icmp_echo_table.idle_timeout = 30
 nat.icmp_echo_table.global_ports.push *(9000 .. 9999)
 
-loop do
-    nat.run()
+Thread.new do
+    loop do
+        nat.run
+    end
 end
+
+def load_webif(nat)
+    puts "loading webif.rb..."
+    begin
+        $webif = eval(File.open("webif.rb").read).call(nat)
+    rescue => e
+        print e.full_message(:highlight => false)
+    rescue SyntaxError => e
+        print e.full_message(:highlight => false)
+    end
+end
+
+load_webif(nat)
+Signal.trap("HUP") do
+    load_webif(nat)
+end
+
+webapp = Proc.new do |env|
+    $webif.call(env)
+end
+Rackup::Handler::WEBrick.run(webapp, :Host => '0.0.0.0', :Port => 8080)
+
