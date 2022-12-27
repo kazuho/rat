@@ -63,15 +63,15 @@ class Rat
         end
         return if table.nil?
 
-        entry = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
-        if entry.nil?
+        tuple = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
+        if tuple.nil?
             puts "drop ICMP destination unreachable to port #{packet.l4.original.l4.src_port}"
             return
         end
 
-        packet.l4.original.src_addr = entry.local_addr
-        packet.l4.original.l4.src_port = entry.local_port
-        packet.dest_addr = entry.local_addr
+        packet.l4.original.src_addr = tuple.local_addr
+        packet.l4.original.l4.src_port = tuple.local_port
+        packet.dest_addr = tuple.local_addr
 
         packet.apply
         @tun.write(packet)
