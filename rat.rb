@@ -1,5 +1,6 @@
 require "rackup"
 require "webrick"
+require "irb"
 require "./tun"
 require "./nat"
 require "./nattable"
@@ -42,8 +43,11 @@ Signal.trap("HUP") do
     load_webif(nat)
 end
 
-webapp = Proc.new do |env|
-    $webif.call(env)
+Thread.new do
+    webapp = Proc.new do |env|
+        $webif.call(env)
+    end
+    Rackup::Handler::WEBrick.run(webapp, :Host => '0.0.0.0', :Port => 8080)
 end
-Rackup::Handler::WEBrick.run(webapp, :Host => '0.0.0.0', :Port => 8080)
 
+IRB.start(__FILE__)
