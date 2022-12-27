@@ -53,7 +53,7 @@ class IP
         bytes[12..15] = @src_addr
         bytes[16..19] = @dest_addr
 
-        encode_u16(10, 0)
+        bytes[10..11] = "\0\0"
         checksum = IP.checksum(bytes, 0, l4_start)
         encode_u16(10, checksum)
 
