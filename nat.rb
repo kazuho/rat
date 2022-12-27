@@ -2,12 +2,18 @@ require "./tun"
 require "./nattable"
 
 GLOBAL_ADDR = "\xc0\xa8\x0\x89".b
+
 $tcp_table = SymmetricNATTable.new("tcp")
 $tcp_table.idle_timeout = 300
 $tcp_table.global_ports.push *(9000 .. 9099)
+
 $udp_table = ConeNATTable.new("udp")
 $udp_table.idle_timeout = 30
 $udp_table.global_ports.push *(9000 .. 9999)
+
+$icmp_echo_table = SymmetricNATTable.new("icmp-echo")
+$icmp_echo_table.idle_timeout = 30
+$icmp_echo_table.global_ports.push *(9000 .. 9999)
 
 def is_egress(packet)
     packet.dest_addr != GLOBAL_ADDR
@@ -22,6 +28,8 @@ def doit()
             table = $tcp_table
         elsif packet.l4.is_a?(UDP)
             table = $udp_table
+        elsif packet.l4.is_a?(ICMPEcho)
+            table = $icmp_echo_table
         end
         if table
             if is_egress(packet)

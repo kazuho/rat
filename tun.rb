@@ -203,7 +203,9 @@ class ICMP
         return nil if bytes.length - off < 8
 
         type = bytes.getbyte(off)
-        if type == ICMPDestUnreach::TYPE
+        if type == ICMPEcho::TYPE_ECHO || type == ICMPEcho::TYPE_REPLY
+            icmp = ICMPEcho.new
+        elsif type == ICMPDestUnreach::TYPE
             icmp = ICMPDestUnreach.new
         else
             icmp = ICMP.new
@@ -214,6 +216,43 @@ class ICMP
 
     def apply(packet, orig_l3_tuple)
         # ICMP does not use pseudo headers
+    end
+
+    def self.recalculate_checksum(packet)
+        packet.encode_u16(packet.l4_start + 2, 0)
+        @checksum = IP.checksum(packet.bytes, packet.l4_start)
+        packet.encode_u16(packet.l4_start + 2, @checksum)
+    end
+end
+
+class ICMPEcho < ICMP
+    TYPE_REPLY = 0
+    TYPE_ECHO = 8
+
+    attr_accessor :src_port, :dest_port
+
+    def _parse(packet)
+        if super(packet).nil?
+            return nil
+        end
+        port = packet.decode_u16(packet.l4_start + 4)
+        if type == TYPE_ECHO
+            @src_port = port
+            @dest_port = 0
+        else
+            @src_port = 0
+            @dest_port = port
+        end
+        self
+    end
+
+    def tuple()
+        [src_port, dest_port].pack("n*")
+    end
+
+    def apply(packet, orig_l3_tuple)
+        packet.encode_u16(packet.l4_start + 4, type == TYPE_ECHO ? @src_port : @dest_port)
+        ICMP.recalculate_checksum(packet)
     end
 end
 
@@ -253,10 +292,7 @@ class ICMPDestUnreach < ICMP
         # overwrite packet image with orig packet being built
         packet.bytes[packet.l4_start + 8 ..] = @orig_packet.bytes
 
-        # recalculate checksum
-        packet.encode_u16(packet.l4_start + 2, 0)
-        @checksum = IP.checksum(packet.bytes, packet.l4_start, packet.bytes.length - packet.l4_start)
-        packet.encode_u16(packet.l4_start + 2, @checksum)
+        ICMP.recalculate_checksum(packet)
     end
 end
 
