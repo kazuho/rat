@@ -6,7 +6,7 @@
 
 require "./tun"
 
-TRUE_ADDR = "\xa\1\2\3".b
+TRUE_ADDR = "\xa\1\2\xfe".b
 FAKE_ADDR = "\xa\1\2\4".b
 
 tun = Tun.new("rat")
