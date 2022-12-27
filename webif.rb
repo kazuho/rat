@@ -1,7 +1,7 @@
 Proc.new do |nat|
     puts "generating webif"
     Proc.new do |env|
-        resp = "<style type='text/css'>body {font-family: monospace}</style>"
+        resp = "<style type='text/css'>body {font-family: monospace} th, td {padding: 0 1em}</style>"
         for table in [nat.tcp_table, nat.udp_table, nat.icmp_echo_table]
             resp += "<h3>#{table.name} (#{table.size}):</h3>\n"
             if table.size != 0
