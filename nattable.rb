@@ -2,7 +2,15 @@ class NATTable
     attr_accessor :name, :idle_timeout, :global_ports
 
     class Entry
-        attr_accessor :prev, :next, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port
+        attr_accessor :prev, :next, :create_at, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port, :packets_sent, :packets_received, :bytes_sent, :bytes_received
+
+        def initialize()
+            @create_at = Time.now.to_i
+            @packets_sent = 0
+            @packets_received = 0
+            @bytes_sent = 0
+            @bytes_received = 0
+        end
 
         def link(anchor)
             @last_access = Time.now.to_i
@@ -50,7 +58,7 @@ class NATTable
             entry.link(@anchor)
         end
 
-        entry.global_port
+        entry
     end
 
     def lookup_ingress(packet)

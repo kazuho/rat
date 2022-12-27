@@ -32,20 +32,24 @@ class Nat
         return if table.nil?
 
         if is_egress(packet)
-            global_port = table.lookup_egress(packet)
-            if global_port.nil?
-                puts "#{table.name}:no empty port"
-            else
+            entry = table.lookup_egress(packet)
+            if entry
+                entry.packets_sent += 1
+                entry.bytes_sent += packet.bytes.length
                 packet.src_addr = @global_addr
-                packet.l4.src_port = global_port
+                packet.l4.src_port = entry.global_port
                 packet.apply
                 @tun.write(packet)
+            else
+                puts "#{table.name}:no empty port"
             end
         else
-            tuple = table.lookup_ingress(packet)
-            if tuple
-                packet.dest_addr = tuple.local_addr
-                packet.l4.dest_port = tuple.local_port
+            entry = table.lookup_ingress(packet)
+            if entry
+                entry.packets_received += 1
+                entry.bytes_received += packet.bytes.length
+                packet.dest_addr = entry.local_addr
+                packet.l4.dest_port = entry.local_port
                 packet.apply
                 @tun.write(packet)
             else
@@ -62,15 +66,17 @@ class Nat
         end
         return if table.nil?
 
-        tuple = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
-        if tuple.nil?
+        entry = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
+        if entry.nil?
             puts "drop ICMP destination unreachable to port #{packet.l4.original.l4.src_port}"
             return
         end
 
-        packet.l4.original.src_addr = tuple.local_addr
-        packet.l4.original.l4.src_port = tuple.local_port
-        packet.dest_addr = tuple.local_addr
+        entry.packets_received += 1
+        entry.bytes_received += packet.bytes.length
+        packet.l4.original.src_addr = entry.local_addr
+        packet.l4.original.l4.src_port = entry.local_port
+        packet.dest_addr = entry.local_addr
 
         packet.apply
         @tun.write(packet)
