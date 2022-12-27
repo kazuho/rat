@@ -68,8 +68,9 @@ class NATTable
     def each()
         entry = @anchor.next
         while entry != @anchor
+            n = entry.next
             yield entry
-            entry = entry.next
+            entry = n
         end
     end
 
