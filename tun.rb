@@ -10,13 +10,13 @@ class IP
     def _parse()
         bytes = @bytes
         return nil if bytes.length < 20
-        return nil if bytes[0].ord != 0x45
+        return nil if bytes.getbyte(0) != 0x45
         # tos?
         # totlen?
         # ignore identification
         return nil if decode_u16(6) & 0xbfff != 0 # ignore fragments
         # ttl: 8
-        @proto = bytes[9].ord
+        @proto = bytes.getbyte(9)
         # checksum 10..11
         @src_addr = bytes[12..15]
         @dest_addr = bytes[16..19]
@@ -48,7 +48,7 @@ class IP
         orig_l3_tuple = bytes[12..19]
 
         # decrement TTL
-        bytes[8] = (bytes[8].ord - 1).chr
+        bytes.setbyte(8, bytes.getbyte(8) - 1)
 
         bytes[12..15] = @src_addr
         bytes[16..19] = @dest_addr
@@ -70,8 +70,8 @@ class IP
 
     def self.encode_u16(bytes, off, v)
         # this seems faster than pack-then-replace
-        bytes[off] = ((v >> 8) & 0xff).chr
-        bytes[off + 1] = (v & 0xff).chr
+        bytes.setbyte(off, (v >> 8) & 0xff)
+        bytes.setbyte(off + 1, v & 0xff)
     end
 
     def self.checksum(bytes, from = nil, len = nil)
@@ -81,7 +81,7 @@ class IP
 
         sum = bytes[from .. to].unpack("n*").sum
         if len % 2 != 0
-            sum += bytes[to].ord * 256
+            sum += bytes.getbyte(to) * 256
         end
         ~((sum >> 16) + sum) & 0xffff
     end
@@ -187,8 +187,8 @@ class ICMP
         bytes = packet.bytes
         off = packet.l4_start
 
-        @type = bytes[off].ord
-        @code = bytes[off + 1].ord
+        @type = bytes.getdyte(off)
+        @code = bytes.getbyte(off + 1)
         @checksum = packet.decode_u16(off + 2)
 
         self
@@ -200,7 +200,7 @@ class ICMP
 
         return nil if bytes.length - off < 8
 
-        type = bytes[off].ord
+        type = bytes.getbyte(off)
         if type == ICMPDestUnreach::TYPE
             icmp = ICMPDestUnreach.new
         else
