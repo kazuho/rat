@@ -50,4 +50,5 @@ Thread.new do
     Rackup::Handler::WEBrick.run(webapp, :Host => '0.0.0.0', :Port => 8080)
 end
 
+$nat = nat
 IRB.start(__FILE__)
