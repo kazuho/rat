@@ -30,10 +30,14 @@ class NATTable
         @global_ports = []
     end
 
-    def lookup_egress(local_addr, local_port, remote_addr, remote_port)
-        entry = @locals[local_key(local_addr, local_port, remote_addr, remote_port)]
+    def lookup_egress(l3, l4)
+        entry = @locals[local_key_from_packet(l3, l4)]
 
         if entry.nil?
+            local_addr = l3.src_addr
+            local_port = l4.src_port
+            remote_addr = l3.dest_addr
+            remote_port = l4.dest_port
             global_port = empty_port(remote_addr, remote_port)
             if global_port.nil?
                 return nil
@@ -48,8 +52,8 @@ class NATTable
         entry.global_port
     end
 
-    def lookup_ingress(global_port, remote_addr, remote_port)
-        @remotes[remote_key(global_port, remote_addr, remote_port)]
+    def lookup_ingress(l3, l4)
+        @remotes[remote_key_from_packet(l3, l4)]
     end
 
     def gc()
@@ -63,8 +67,8 @@ class NATTable
 
     def _gc_entry(entry)
         entry.unlink
-        @locals.delete(local_key(entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port))
-        @remotes.delete(remote_key(entry.global_port, entry.remote_addr, entry.remote_port))
+        @locals.delete(local_key_from_tuple(entry.local_addr, entry.local_port, entry.remote_addr, entry.remote_port))
+        @remotes.delete(remote_key_from_tuple(entry.global_port, entry.remote_addr, entry.remote_port))
     end
 
     def _insert(local_addr, local_port, global_port, remote_addr, remote_port)
@@ -76,8 +80,8 @@ class NATTable
         entry.remote_port = remote_port
 
         entry.link(@anchor)
-        @locals[local_key(local_addr, local_port, remote_addr, remote_port)] = entry
-        @remotes[remote_key(global_port, remote_addr, remote_port)] = entry
+        @locals[local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)] = entry
+        @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)] = entry
 
         entry
     end
@@ -88,19 +92,27 @@ class SymmetricNATTable < NATTable
         gc
         20.times do
             test_port = @global_ports[rand(@global_ports.length)]
-            unless @remotes[remote_key(test_port, remote_addr, remote_port)]
+            unless @remotes[remote_key_from_tuple(test_port, remote_addr, remote_port)]
                 return test_port
             end
         end
         nil
     end
 
-    def local_key(local_addr, local_port, remote_addr, remote_port)
-        local_addr + [local_port].pack("n") + remote_addr + [remote_port].pack("n")
+    def local_key_from_packet(l3, l4)
+        l3.tuple + l4.tuple
     end
 
-    def remote_key(global_port, remote_addr, remote_port)
-       [global_port].pack("n") + remote_addr + [remote_port].pack("n")
+    def local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)
+        local_addr + remote_addr + [local_port].pack("n") + [remote_port].pack("n")
+    end
+
+    def remote_key_from_packet(l3, l4)
+        l3.src_addr + l4.tuple
+    end
+
+    def remote_key_from_tuple(global_port, remote_addr, remote_port)
+       remote_addr + [remote_port].pack("n") + [global_port].pack("n")
     end
 end
 
@@ -121,11 +133,19 @@ class ConeNATTable < NATTable
         @empty_ports.push entry.global_port
     end
 
-    def local_key(local_addr, local_port, remote_addr, remote_port)
+    def local_key_from_packet(l3, l4)
+        l3.src_addr + [l4.src_port].pack("n")
+    end
+
+    def local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)
         local_addr + [local_port].pack("n")
     end
 
-    def remote_key(global_port, remote_addr, remote_port)
-       [global_port].pack("n")
+    def remote_key_from_packet(l3, l4)
+        l4.dest_port
+    end
+
+    def remote_key_from_tuple(global_port, remote_addr, remote_port)
+       global_port
     end
 end

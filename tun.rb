@@ -18,8 +18,8 @@ class Packet
     end
 
     def apply()
-        orig_l3_tuple = l3._apply(self)
-        l4._apply(self, orig_l3_tuple)
+        orig_l3_tuple = l3.apply(self)
+        l4.apply(self, orig_l3_tuple)
     end
 
     def decode_u16(off)
@@ -27,9 +27,13 @@ class Packet
     end
 
     def encode_u16(off, v)
+        Packet.encode_u16(@bytes, off, v)
+    end
+
+    def self.encode_u16(bytes, off, v)
         # this seems faster than pack-then-replace
-        @bytes[off] = ((v >> 8) & 0xff).chr
-        @bytes[off + 1] = (v & 0xff).chr
+        bytes[off] = ((v >> 8) & 0xff).chr
+        bytes[off + 1] = (v & 0xff).chr
     end
 end
 
@@ -100,7 +104,7 @@ class IPv4 < IP
         @src_addr + @dest_addr
     end
 
-    def _apply(packet)
+    def apply(packet)
         bytes = packet.bytes
 
         orig_tuple = bytes[12..19]
@@ -123,83 +127,70 @@ class IPv4 < IP
     end
 end
 
-class UDP
-    PROTOCOL_ID = 17
+class TCPUDP
+    attr_accessor :tuple
 
-    attr_accessor :src_port, :dest_port
+    def src_port()
+        @tuple[0 .. 1].unpack1("n")
+    end
 
-    def _parse(packet)
+    def src_port=(n)
+        Packet.encode_u16(@tuple, 0, n)
+    end
+
+    def dest_port()
+        @tuple[2 .. 3].unpack1("n")
+    end
+
+    def dest_port=(n)
+        Packet.encode_u16(@tuple, 2, n)
+    end
+
+    def _parse(packet, min_len)
+        bytes = packet.bytes
         off = packet.l4_start
 
-        return nil if packet.bytes.length - off < 8
-        @src_port = packet.decode_u16(off)
-        @dest_port = packet.decode_u16(off + 2)
-        # length 2 bytes
-        # checksum 2 bytes
+        return nil if bytes.length - off < min_len
+        @tuple = packet.bytes[off .. off + 3]
 
         self
     end
 
-    def self.parse(packet)
-        UDP.new._parse(packet)
-    end
-
-    def _apply(packet, orig_l3_tuple)
+    def _apply(packet, orig_l3_tuple, checksum_offset)
         bytes = packet.bytes
         l4_start = packet.l4_start
 
         orig_bytes = orig_l3_tuple + bytes[l4_start .. l4_start + 3]
+        bytes[l4_start .. l4_start + 3] = @tuple
+        new_bytes = packet.l3.tuple + @tuple
 
-        packet.encode_u16(l4_start, @src_port)
-        packet.encode_u16(l4_start + 2, @dest_port)
-
-        new_bytes = packet.l3.tuple + bytes[l4_start .. l4_start + 3]
-
-        checksum = packet.decode_u16(packet.l4_start + 6)
+        checksum = packet.decode_u16(l4_start + checksum_offset)
         checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
-        packet.encode_u16(packet.l4_start + 6, checksum)
+        packet.encode_u16(l4_start + checksum_offset, checksum)
     end
 end
 
-class TCP
-    PROTOCOL_ID = 6
-
-    attr_accessor :src_port, :dest_port
-    attr_reader :flags
-
-    def _parse(packet)
-        off = packet.l4_start
-
-        return nil if packet.bytes.length - off < 20
-        @src_port = packet.decode_u16(off)
-        @dest_port = packet.decode_u16(off + 2)
-        # seq 4 bytes
-        # ack 4 bytes
-        @flags = packet.decode_u16(off + 12)
-        # winsz 2 bytes
-        # checksum 2 bytes
-
-        self
-    end
+class UDP < TCPUDP
+    PROTOCOL_ID = 17
 
     def self.parse(packet)
-        TCP.new._parse(packet)
+        UDP.new._parse(packet, 8)
     end
 
-    def _apply(packet, orig_l3_tuple)
-        bytes = packet.bytes
-        l4_start = packet.l4_start
+    def apply(packet, orig_l3_tuple)
+        _apply(packet, orig_l3_tuple, 6)
+    end
+end
 
-        orig_bytes = orig_l3_tuple + bytes[l4_start .. l4_start + 3]
+class TCP < TCPUDP
+    PROTOCOL_ID = 6
 
-        packet.encode_u16(l4_start, @src_port)
-        packet.encode_u16(l4_start + 2, @dest_port)
+    def self.parse(packet)
+        TCP.new._parse(packet, 20)
+    end
 
-        new_bytes = packet.l3.tuple + bytes[l4_start .. l4_start + 3]
-
-        checksum = packet.decode_u16(l4_start + 16)
-        checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
-        packet.encode_u16(packet.l4_start + 16, checksum)
+    def apply(packet, orig_l3_tuple)
+        _apply(packet, orig_l3_tuple, 16)
     end
 end
 

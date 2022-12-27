@@ -25,7 +25,7 @@ def doit()
         end
         if table
             if is_egress(packet)
-                global_port = table.lookup_egress(packet.l3.src_addr, packet.l4.src_port, packet.l3.dest_addr, packet.l4.dest_port)
+                global_port = table.lookup_egress(packet.l3, packet.l4)
                 if global_port.nil?
                     puts "#{table.name}:no empty port"
                 else
@@ -35,7 +35,7 @@ def doit()
                     $tun.write(packet)
                 end
             else
-                tuple = table.lookup_ingress(packet.l4.dest_port, packet.l3.src_addr, packet.l4.src_port)
+                tuple = table.lookup_ingress(packet.l3, packet.l4)
                 if tuple
                     packet.l3.dest_addr = tuple.local_addr
                     packet.l4.dest_port = tuple.local_port
