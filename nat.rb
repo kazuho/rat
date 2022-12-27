@@ -21,6 +21,27 @@ end
 
 $tun = Tun.new("rat")
 
+def handle_destunreach(packet)
+    if packet.l4.original.l4.is_a?(TCP)
+        table = $tcp_table
+    elsif packet.l4.original.l4.is_a?(UDP)
+        table = $udp_table
+    else
+        return
+    end
+    entry = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
+    if entry.nil?
+        return
+    end
+
+    packet.l4.original.src_addr = entry.local_addr
+    packet.l4.original.l4.src_port = entry.local_port
+    packet.dest_addr = entry.local_addr
+
+    packet.apply
+    $tun.write(packet)
+end
+
 def doit()
     packet = $tun.read()
     if packet && packet.l4
@@ -30,6 +51,8 @@ def doit()
             table = $udp_table
         elsif packet.l4.is_a?(ICMPEcho)
             table = $icmp_echo_table
+        elsif packet.l4.is_a?(ICMPDestUnreach) && !is_egress(packet)
+            handle_destunreach(packet)
         end
         if table
             if is_egress(packet)

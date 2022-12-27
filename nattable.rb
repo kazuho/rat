@@ -57,6 +57,10 @@ class NATTable
         @remotes[remote_key_from_packet(packet)]
     end
 
+    def lookup_ingress3(global_port, remote_addr, remote_port)
+        @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)]
+    end
+
     def gc()
         items_before = Time.now.to_i - idle_timeout
         while @anchor.next != @anchor && @anchor.next.last_access < items_before

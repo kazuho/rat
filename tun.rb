@@ -259,38 +259,26 @@ end
 class ICMPDestUnreach < ICMP
     TYPE = 3
 
-    attr_reader :orig_proto
-    attr_accessor :orig_src_addr, :orig_dest_addr, :orig_src_port, :orig_dest_port
+    attr_accessor :original
 
     def _parse(packet)
         if super(packet).nil?
             return nil
         end
 
-        @orig_packet = IP.parse(packet.bytes[packet.l4_start + 8 ..], true)
-        if @orig_packet.nil? || @orig_packet.l4.nil?
+        @original = IP.parse(packet.bytes[packet.l4_start + 8 ..], true)
+        if @original.nil? || @original.l4.nil?
             return nil
         end
-
-        @orig_proto = @orig_packet.proto
-        @orig_src_addr = @orig_packet.src_addr
-        @orig_dest_addr = @orig_packet.dest_addr
-        @orig_src_port = @orig_packet.decode_u16(@orig_packet.l4_start)
-        @orig_dest_port = @orig_packet.decode_u16(@orig_packet.l4_start + 2)
 
         self
     end
 
     def apply(packet, orig_l3_tuple)
-        # update 4 tuple of orig_packet
-        @orig_packet.src_addr = @orig_src_addr
-        @orig_packet.dest_addr = @orig_dest_addr
-        @orig_packet.l4.src_port = @orig_src_port
-        @orig_packet.l4.dest_port = @orig_dest_port
-        @orig_packet.apply
+        @original.apply
 
         # overwrite packet image with orig packet being built
-        packet.bytes[packet.l4_start + 8 ..] = @orig_packet.bytes
+        packet.bytes[packet.l4_start + 8 ..] = @original.bytes
 
         ICMP.recalculate_checksum(packet)
     end
