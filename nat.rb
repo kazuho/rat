@@ -17,7 +17,7 @@ $tun = Tun.new("rat")
 
 def doit()
     packet = $tun.read()
-    if packet.l4
+    if packet && packet.l4
         if packet.l4.is_a?(TCP)
             table = $tcp_table
         elsif packet.l4.is_a?(UDP)
