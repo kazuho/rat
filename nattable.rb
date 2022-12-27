@@ -105,7 +105,7 @@ class SymmetricNATTable < NATTable
     end
 
     def local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)
-        local_addr + remote_addr + [local_port].pack("n") + [remote_port].pack("n")
+        local_addr + remote_addr + [local_port, remote_port].pack("n*")
     end
 
     def remote_key_from_packet(packet)
@@ -113,7 +113,7 @@ class SymmetricNATTable < NATTable
     end
 
     def remote_key_from_tuple(global_port, remote_addr, remote_port)
-       remote_addr + [remote_port].pack("n") + [global_port].pack("n")
+       remote_addr + [remote_port, global_port].pack("n*")
     end
 end
 
