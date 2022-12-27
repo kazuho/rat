@@ -187,7 +187,7 @@ class ICMP
         bytes = packet.bytes
         off = packet.l4_start
 
-        @type = bytes.getdyte(off)
+        @type = bytes.getbyte(off)
         @code = bytes.getbyte(off + 1)
         @checksum = packet.decode_u16(off + 2)
 
@@ -210,7 +210,7 @@ class ICMP
         icmp._parse(packet)
     end
 
-    def _apply(packet, orig_l3_tuple)
+    def apply(packet, orig_l3_tuple)
         # ICMP does not use pseudo headers
     end
 end
@@ -226,7 +226,7 @@ class ICMPDestUnreach < ICMP
             return nil
         end
 
-        @orig_packet = Packet.new(packet.bytes[packet.l4_start + 8 ..])
+        @orig_packet = IP.new(packet.bytes[packet.l4_start + 8 ..])
         if @orig_packet.nil?
             return nil
         end

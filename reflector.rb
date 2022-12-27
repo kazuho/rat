@@ -9,7 +9,7 @@ require "./tun"
 TRUE_ADDR = "\xa\1\2\3".b
 FAKE_ADDR = "\xa\1\2\4".b
 
-tun = Tun.new("tap-e")
+tun = Tun.new("rat")
 loop do
     packet = tun.read()
     if packet and packet.l4
