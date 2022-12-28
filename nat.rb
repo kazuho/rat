@@ -34,6 +34,9 @@ class Nat
         if is_egress(packet)
             entry = table.lookup_egress(packet)
             if entry
+                if entry.bytes_sent < 200 && packet.l4.is_a?(TCP) && packet.bytes.length >= 100 && entry.stash["first-packet"].nil?
+                    entry.stash["first-packet"] = packet.bytes
+                end
                 entry.packets_sent += 1
                 entry.bytes_sent += packet.bytes.length
                 packet.src_addr = @global_addr

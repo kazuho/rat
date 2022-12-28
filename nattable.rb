@@ -2,7 +2,7 @@ class NATTable
     attr_accessor :name, :idle_timeout, :global_ports
 
     class Entry
-        attr_accessor :prev, :next, :create_at, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port, :packets_sent, :packets_received, :bytes_sent, :bytes_received
+        attr_accessor :prev, :next, :create_at, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port, :packets_sent, :packets_received, :bytes_sent, :bytes_received, :stash
 
         def initialize()
             @create_at = Time.now.to_i
@@ -10,6 +10,7 @@ class NATTable
             @packets_received = 0
             @bytes_sent = 0
             @bytes_received = 0
+            @stash = {}
         end
 
         def link(anchor)
