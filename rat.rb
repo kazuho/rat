@@ -1,5 +1,7 @@
 require "rackup"
-require "webrick"
+require "async/scheduler"
+require "falcon"
+require "rack/handler/falcon"
 require "irb"
 require "./tun"
 require "./nat"
@@ -21,7 +23,10 @@ nat.icmp_echo_table = SymmetricNATTable.new("icmp-echo")
 nat.icmp_echo_table.idle_timeout = 30
 nat.icmp_echo_table.global_ports.push *(9000 .. 9999)
 
-Thread.new do
+scheduler = Async::Scheduler.new
+Fiber.set_scheduler(scheduler)
+
+Fiber.schedule do
     loop do
         nat.run
     end
@@ -43,12 +48,15 @@ Signal.trap("HUP") do
     load_webif(nat)
 end
 
-Thread.new do
+Fiber.schedule do
     webapp = Proc.new do |env|
         $webif.call(env)
     end
-    Rackup::Handler::WEBrick.run(webapp, :Host => '0.0.0.0', :Port => 8080)
+    Rack::Handler::Falcon.run(webapp, :Host => '0.0.0.0', :Port => 8080)
 end
 
-$nat = nat
-IRB.start(__FILE__)
+Fiber.schedule do
+    $nat = nat
+    IRB.start(__FILE__)
+    exit
+end
