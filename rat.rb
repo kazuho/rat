@@ -11,66 +11,22 @@ $nat = Nat.new("rat")
 # global address is 192.168.0.137
 $nat.global_addr = "\xc0\xa8\x0\x89".b
 
-# TCP table
+# create TCP, UDP, ICMP Echo tables
 $nat.tcp_table = SymmetricNATTable.new("tcp")
 $nat.tcp_table.idle_timeout = 300
-$nat.tcp_table.global_ports.push *(9000 .. 9099)
-
-# UDP table
 $nat.udp_table = ConeNATTable.new("udp")
 $nat.udp_table.idle_timeout = 30
-$nat.udp_table.global_ports.push *(9000 .. 9999)
-
-# ICMP Echo (ping) table
 $nat.icmp_echo_table = SymmetricNATTable.new("icmp-echo")
 $nat.icmp_echo_table.idle_timeout = 30
-$nat.icmp_echo_table.global_ports.push *(9000 .. 9999)
 
-# loggers
-def log(event, table, local_addr, local_port, global_port, remote_addr, remote_port, others = nil)
-    if $logfp.nil?
-        $logfp = open("rat.log", "a")
-    end
-    hash = {
-        "at"          => Time.now.to_i,
-        "event"       => event,
-        "table"       => table,
-        "local_addr"  => local_addr ? IP.addr_to_s(local_addr) : nil,
-        "local_port"  => local_port,
-        "global_port" => global_port,
-        "remote_addr" => IP.addr_to_s(remote_addr),
-        "remote_port" => remote_port,
-    }
-    if others
-        hash.merge! others
-    end
-    $logfp.syswrite JSON.fast_generate(hash) + "\n"
-end
-
-$nat.on_no_empty_port = Proc.new do |nat, table, local_addr, local_port, remote_addr, remote_port|
-    log("no-empty-port", table.name, local_addr, local_port, nil, remote_addr, remote_port)
-end
-
-$nat.on_drop_ingress = Proc.new do |nat, table, global_port, remote_addr, remote_port|
-    log("drop-ingress", table.name, nil, nil, global_port, remote_addr, remote_port)
-end
-
+# setup ports and logger for each table
 for table in [$nat.tcp_table, $nat.udp_table, $nat.icmp_echo_table]
-    table.on_insert = Proc.new do |table, entry, packet|
-        log("insert", table.name, entry.local_addr, entry.local_port, entry.global_port, entry.remote_addr, entry.remote_port,
-            {"table_size" => table.size})
-    end
-    table.on_delete = Proc.new do |table, entry, packet|
-        log("delete", table.name, entry.local_addr, entry.local_port, entry.global_port, entry.remote_addr, entry.remote_port,
-            {
-                "create"           => entry.create_at,
-                "last_access"      => entry.last_access,
-                "packets_sent"     => entry.packets_sent,
-                "packets_received" => entry.packets_received,
-                "bytes_sent"       => entry.bytes_sent,
-                "bytes_received"   => entry.bytes_received,
-                "table_size"       => table.size,
-            })
+    table.global_ports.push *(9000 .. 9999)
+    table.get_logfp = Proc.new do
+        if $logfp.nil?
+            $logfp = open("rat.log", "a")
+        end
+        $logfp
     end
 end
 

@@ -1,12 +1,10 @@
 require "./tun"
 
 class Nat
-    attr_accessor :global_addr, :tcp_table, :udp_table, :icmp_echo_table, :on_no_empty_port, :on_drop_ingress
+    attr_accessor :global_addr, :tcp_table, :udp_table, :icmp_echo_table
 
     def initialize(devname)
         @tun = Tun.new(devname)
-        @on_no_empty_port = Proc.new do end
-        @on_drop_ingress = Proc.new do end
     end
 
     def is_egress(packet)
@@ -42,8 +40,6 @@ class Nat
                 packet.l4.src_port = entry.global_port
                 packet.apply
                 @tun.write(packet)
-            else
-                @on_no_empty_port.call(self, table, packet.src_addr, packet.l4.src_port, packet.dest_addr, packet.l4.dest_port)
             end
         else
             entry = table.lookup_ingress(packet)
@@ -54,8 +50,6 @@ class Nat
                 packet.l4.dest_port = entry.local_port
                 packet.apply
                 @tun.write(packet)
-            else
-                @on_drop_ingress.call(self, table, packet.l4.dest_port, packet.src_addr, packet.l4.src_port)
             end
         end
     end
@@ -70,7 +64,6 @@ class Nat
 
         entry = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
         if entry.nil?
-            @on_drop_ingress.call(self, table, packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
             return
         end
 
@@ -83,5 +76,6 @@ class Nat
         packet.apply
         @tun.write(packet)
     end
+
 end
 

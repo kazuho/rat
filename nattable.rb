@@ -1,5 +1,5 @@
 class NATTable
-    attr_accessor :name, :idle_timeout, :global_ports, :on_insert, :on_delete
+    attr_accessor :name, :idle_timeout, :global_ports, :get_logfp
 
     class Entry
         attr_accessor :prev, :next, :create_at, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port, :packets_sent, :packets_received, :bytes_sent, :bytes_received
@@ -36,8 +36,8 @@ class NATTable
         @locals = {}  # index of entries with key: local_addr + local_port + remote_addr + remote_port
         @remotes = {} # index of entries with key: global_port + remote_addr + remote_port
         @global_ports = []
-        @on_insert = Proc.new do end
-        @on_delete = Proc.new do end
+        @get_logfp = Proc.new do end
+
     end
 
     def lookup_egress(packet)
@@ -51,10 +51,11 @@ class NATTable
             remote_port = l4.dest_port
             global_port = empty_port(remote_addr, remote_port)
             if global_port.nil?
+                log("no_empty_port", local_addr, local_port, nil, remote_addr, remote_port, {"table_size" => size})
                 return nil
             end
             entry = _insert(local_addr, local_port, global_port, remote_addr, remote_port)
-            @on_insert.call(self, entry, packet)
+            log("insert", local_addr, local_port, global_port, remote_addr, remote_port, {"table_size" => size})
         else
             entry.unlink
             entry.link(@anchor)
@@ -64,11 +65,19 @@ class NATTable
     end
 
     def lookup_ingress(packet)
-        @remotes[remote_key_from_packet(packet)]
+        entry = @remotes[remote_key_from_packet(packet)]
+        if entry.nil?
+            log("ingress_not_found", nil, nil, packet.l4.dest_port, packet.src_addr, packet.l4.src_port)
+        end
+        entry
     end
 
     def lookup_ingress3(global_port, remote_addr, remote_port)
-        @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)]
+        entry = @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)]
+        if entry.nil?
+            log("ingress_not_found", nil, nil, global_port, remote_addr, remote_port)
+        end
+        entry
     end
 
     def size()
@@ -89,7 +98,16 @@ class NATTable
         while @anchor.next != @anchor && @anchor.next.last_access < items_before
             entry = @anchor.next
             _gc_entry(entry)
-            @on_delete.call(self, entry)
+            log("delete", entry.local_addr, entry.local_port, entry.global_port, entry.remote_addr, entry.remote_port,
+                {
+                    "create"           => entry.create_at,
+                    "last_access"      => entry.last_access,
+                    "packets_sent"     => entry.packets_sent,
+                    "packets_received" => entry.packets_received,
+                    "bytes_sent"       => entry.bytes_sent,
+                    "bytes_received"   => entry.bytes_received,
+                    "table_size"       => size,
+                })
         end
     end
 
@@ -112,6 +130,26 @@ class NATTable
         @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)] = entry
 
         entry
+    end
+
+    def log(event, local_addr, local_port, global_port, remote_addr, remote_port, others = nil)
+        logfp = @get_logfp.call
+        if logfp
+            hash = {
+                "at"          => Time.now.to_i,
+                "event"       => event,
+                "table"       => @name,
+                "local_addr"  => local_addr ? IP.addr_to_s(local_addr) : nil,
+                "local_port"  => local_port,
+                "global_port" => global_port,
+                "remote_addr" => IP.addr_to_s(remote_addr),
+                "remote_port" => remote_port,
+            }
+            if others
+                hash.merge! others
+            end
+            logfp.syswrite JSON.fast_generate(hash) + "\n"
+        end
     end
 end
 
