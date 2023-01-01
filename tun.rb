@@ -207,6 +207,8 @@ class ICMP
             icmp = ICMPEcho.new
         elsif type == ICMPDestUnreach::TYPE
             icmp = ICMPDestUnreach.new
+        elsif type == ICMPTimeExceeded::TYPE
+            icmp = ICMPTimeExceeded.new
         else
             icmp = ICMP.new
         end
@@ -256,9 +258,7 @@ class ICMPEcho < ICMP
     end
 end
 
-class ICMPDestUnreach < ICMP
-    TYPE = 3
-
+class ICMPWithOriginalPacket < ICMP
     attr_accessor :original
 
     def _parse(packet)
@@ -282,6 +282,14 @@ class ICMPDestUnreach < ICMP
 
         ICMP.recalculate_checksum(packet)
     end
+end
+
+class ICMPDestUnreach < ICMPWithOriginalPacket
+    TYPE = 3
+end
+
+class ICMPTimeExceeded < ICMPWithOriginalPacket
+    TYPE = 11
 end
 
 class Tun

@@ -25,8 +25,8 @@ class Nat
             table = @udp_table
         elsif packet.l4.is_a?(ICMPEcho)
             table = @icmp_echo_table
-        elsif packet.l4.is_a?(ICMPDestUnreach) && !is_egress(packet)
-            handle_destunreach(packet)
+        elsif packet.l4.is_a?(ICMPWithOriginalPacket) && !is_egress(packet)
+            handle_icmp_with_original_packet(packet)
             return
         end
         return if table.nil?
@@ -54,15 +54,17 @@ class Nat
         end
     end
 
-    def handle_destunreach(packet)
+    def handle_icmp_with_original_packet(packet)
         if packet.l4.original.l4.is_a?(TCP)
             table = @tcp_table
         elsif packet.l4.original.l4.is_a?(UDP)
             table = @udp_table
+        elsif packet.l4.original.l4.is_a?(ICMPEcho)
+            table = @icmp_echo_table
         end
         return if table.nil?
 
-        entry = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
+        entry = table.icmp_lookup_ingress(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
         if entry.nil?
             return
         end

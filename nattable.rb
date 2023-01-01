@@ -72,10 +72,10 @@ class NATTable
         entry
     end
 
-    def lookup_ingress3(global_port, remote_addr, remote_port)
+    def icmp_lookup_ingress(global_port, remote_addr, remote_port)
         entry = @remotes[remote_key_from_tuple(global_port, remote_addr, remote_port)]
         if entry.nil?
-            log("ingress_not_found", nil, nil, global_port, remote_addr, remote_port)
+            log("icmp_ingress_not_found", nil, nil, global_port, remote_addr, remote_port)
         end
         entry
     end
