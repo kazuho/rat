@@ -47,12 +47,12 @@ def log(event, table, local_addr, local_port, global_port, remote_addr, remote_p
     $logfp.syswrite JSON.fast_generate(hash) + "\n"
 end
 
-$nat.on_no_empty_port = Proc.new do |nat, packet, table|
-    log("no-empty-port", table.name, packet.src_addr, packet.l4.src_port, packet.dest_addr, packet.l4.dest_port)
+$nat.on_no_empty_port = Proc.new do |nat, table, local_addr, local_port, remote_addr, remote_port|
+    log("no-empty-port", table.name, local_addr, local_port, nil, remote_addr, remote_port)
 end
 
-$nat.on_drop_ingress = Proc.new do |nat, packet, table|
-    log("drop-ingress", table.name, nil, nil, packet.l4.dest_port, packet.src_addr, packet.l4.dest_port)
+$nat.on_drop_ingress = Proc.new do |nat, table, global_port, remote_addr, remote_port|
+    log("drop-ingress", table.name, nil, nil, global_port, remote_addr, remote_port)
 end
 
 for table in [$nat.tcp_table, $nat.udp_table, $nat.icmp_echo_table]

@@ -43,7 +43,7 @@ class Nat
                 packet.apply
                 @tun.write(packet)
             else
-                @on_no_empty_port.call(self, packet, table)
+                @on_no_empty_port.call(self, table, packet.src_addr, packet.l4.src_port, packet.dest_addr, packet.l4.dest_port)
             end
         else
             entry = table.lookup_ingress(packet)
@@ -55,7 +55,7 @@ class Nat
                 packet.apply
                 @tun.write(packet)
             else
-                @on_drop_ingress.call(self, packet, table)
+                @on_drop_ingress.call(self, table, packet.l4.dest_port, packet.src_addr, packet.l4.src_port)
             end
         end
     end
@@ -70,7 +70,7 @@ class Nat
 
         entry = table.lookup_ingress3(packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
         if entry.nil?
-            puts "drop ICMP destination unreachable to port #{packet.l4.original.l4.src_port}"
+            @on_drop_ingress.call(self, table, packet.l4.original.l4.src_port, packet.l4.original.dest_addr, packet.l4.original.l4.dest_port)
             return
         end
 
