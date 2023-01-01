@@ -1,5 +1,5 @@
 class NATTable
-    attr_accessor :name, :idle_timeout, :global_ports
+    attr_accessor :name, :idle_timeout, :global_ports, :on_insert, :on_delete
 
     class Entry
         attr_accessor :prev, :next, :create_at, :last_access, :local_addr, :local_port, :global_port, :remote_addr, :remote_port, :packets_sent, :packets_received, :bytes_sent, :bytes_received
@@ -36,6 +36,8 @@ class NATTable
         @locals = {}  # index of entries with key: local_addr + local_port + remote_addr + remote_port
         @remotes = {} # index of entries with key: global_port + remote_addr + remote_port
         @global_ports = []
+        @on_insert = Proc.new do end
+        @on_delete = Proc.new do end
     end
 
     def lookup_egress(packet)
@@ -52,7 +54,7 @@ class NATTable
                 return nil
             end
             entry = _insert(local_addr, local_port, global_port, remote_addr, remote_port)
-            puts "#{name}:adding #{IP.addr_to_s(local_addr)}:#{local_port}:#{IP.addr_to_s(remote_addr)}:#{remote_port} using #{global_port}, total #{@locals.size}"
+            @on_insert.call(self, entry, packet)
         else
             entry.unlink
             entry.link(@anchor)
@@ -87,7 +89,7 @@ class NATTable
         while @anchor.next != @anchor && @anchor.next.last_access < items_before
             entry = @anchor.next
             _gc_entry(entry)
-            puts "#{name}:removing #{entry.global_port}, total #{@locals.size}"
+            @on_delete.call(self, entry)
         end
     end
 
