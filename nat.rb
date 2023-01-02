@@ -79,28 +79,24 @@ class Nat
         @tun.write(packet)
     end
 
-    def self.webapp
-        klass = Class.new do
-            def call(env)
-                if @app.nil?
-                    begin
-                        @app = eval(File.open("webif.rb").read).call($nat)
-                    rescue => e
-                        print e.full_message(:highlight => false)
-                    rescue SyntaxError => e
-                        print e.full_message(:highlight => false)
-                    end
-                end
-                if @app
-                    @app.call(env)
-                else
-                    [500, {"content-type" => "text/plain; charset=utf-8"}, ["webif broken at the moment"]]
-                end
-            end
-            def reload()
-                @app = nil
+    def webapp(env)
+        if @webapp.nil?
+            begin
+                @webapp = eval(File.open("webif.rb").read).call(self)
+            rescue => e
+                print e.full_message(:highlight => false)
+            rescue SyntaxError => e
+                print e.full_message(:highlight => false)
             end
         end
-        klass.new
+        if @webapp
+            @webapp.call(env)
+        else
+            [500, {"content-type" => "text/plain; charset=utf-8"}, ["webif broken at the moment"]]
+        end
+    end
+
+    def reload_webapp
+        @webapp = nil
     end
 end

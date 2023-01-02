@@ -74,15 +74,14 @@ spawn_thread do
 end
 
 # Web UI thread
-$webapp = Nat.webapp
 spawn_thread do
-    rack_handler.run($webapp, :Host => '0.0.0.0', :Port => 8080)
+    rack_handler.run(Proc.new {|env| $nat.webapp(env) }, :Host => '0.0.0.0', :Port => 8080)
 end
 
 # upon SIGHUP, reset logger and webif state so that they would be reinitialized
 Signal.trap("HUP") do
     $logfp = nil
-    $webapp.reload
+    $nat.reload_webapp
 end
 
 # start IRB on the main thread
