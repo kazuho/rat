@@ -104,4 +104,3 @@ class Nat
         klass.new
     end
 end
-
