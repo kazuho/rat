@@ -305,7 +305,7 @@ class Tun
     end
 
     def read()
-        bytes = @tundev.sysread(1500)
+        bytes = @tundev.readpartial(1500)
         return IP.parse(bytes)
     end
 
