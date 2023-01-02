@@ -73,31 +73,16 @@ spawn_thread do
     end
 end
 
-# webif thread
+# Web UI thread
+$webapp = Nat.webapp
 spawn_thread do
-    webapp = Proc.new do |env|
-        if $webif.nil?
-            begin
-                $webif = eval(File.open("webif.rb").read).call($nat)
-            rescue => e
-                print e.full_message(:highlight => false)
-            rescue SyntaxError => e
-                print e.full_message(:highlight => false)
-            end
-        end
-        if $webif
-            $webif.call(env)
-        else
-            [500, {"content-type" => "text/plain; charset=utf-8"}, ["webif broken at the moment"]]
-        end
-    end
-    rack_handler.run(webapp, :Host => '0.0.0.0', :Port => 8080)
+    rack_handler.run($webapp, :Host => '0.0.0.0', :Port => 8080)
 end
 
 # upon SIGHUP, reset logger and webif state so that they would be reinitialized
 Signal.trap("HUP") do
     $logfp = nil
-    $webif = nil
+    $webapp.reload
 end
 
 # start IRB on the main thread
