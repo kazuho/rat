@@ -1,10 +1,40 @@
 require "irb"
 require "json"
 require "rackup"
-require "webrick"
 require "./tun"
 require "./nat"
 require "./nattable"
+
+if ENV["RAT_USE_FIBER"]
+    require "async/scheduler"
+    require "falcon"
+    require "rack/handler/falcon"
+
+    Fiber.set_scheduler(Async::Scheduler.new)
+    def spawn_thread(last = false)
+        Fiber.schedule do
+            yield
+        end
+    end
+    def rack_handler()
+        Rack::Handler::Falcon
+    end
+else
+    require "webrick"
+
+    def spawn_thread(last = false)
+        if last
+            yield
+        else
+            Thread.new do
+                yield
+            end
+        end
+    end
+    def rack_handler()
+        Rackup::Handler::WEBrick
+    end
+end
 
 $nat = Nat.new("rat")
 
@@ -31,7 +61,7 @@ for table in [$nat.tcp_table, $nat.udp_table, $nat.icmp_echo_table]
 end
 
 # the nat thread (that restarts itself upon exception)
-Thread.new do
+spawn_thread do
     loop do
         begin
             loop do
@@ -44,7 +74,7 @@ Thread.new do
 end
 
 # webif thread
-Thread.new do
+spawn_thread do
     webapp = Proc.new do |env|
         if $webif.nil?
             begin
@@ -61,7 +91,7 @@ Thread.new do
             [500, {"content-type" => "text/plain; charset=utf-8"}, ["webif broken at the moment"]]
         end
     end
-    Rackup::Handler::WEBrick.run(webapp, :Host => '0.0.0.0', :Port => 8080)
+    rack_handler.run(webapp, :Host => '0.0.0.0', :Port => 8080)
 end
 
 # upon SIGHUP, reset logger and webif state so that they would be reinitialized
@@ -71,4 +101,6 @@ Signal.trap("HUP") do
 end
 
 # start IRB on the main thread
-IRB.start(__FILE__)
+spawn_thread(true) do
+    IRB.start(__FILE__)
+end
