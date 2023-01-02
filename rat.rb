@@ -1,90 +1,86 @@
-require "irb"
-require "json"
-require "rackup"
-require "./tun"
-require "./nat"
-require "./nattable"
+# frozen_string_literal: true
 
-if ENV["RAT_USE_FIBER"]
-    require "async/scheduler"
-    require "falcon"
-    require "rack/handler/falcon"
+require 'irb'
+require 'json'
+require 'rackup'
+require './tun'
+require './nat'
+require './nattable'
 
-    Fiber.set_scheduler(Async::Scheduler.new)
-    def spawn_thread(last = false)
-        Fiber.schedule do
-            yield
-        end
-    end
-    def rack_handler()
-        Rack::Handler::Falcon
-    end
+if ENV['RAT_USE_FIBER']
+  require 'async/scheduler'
+  require 'falcon'
+  require 'rack/handler/falcon'
+
+  Fiber.set_scheduler(Async::Scheduler.new)
+  def spawn_thread(_last = false, &block)
+    Fiber.schedule(&block)
+  end
+
+  def rack_handler
+    Rack::Handler::Falcon
+  end
 else
-    require "webrick"
+  require 'webrick'
 
-    def spawn_thread(last = false)
-        if last
-            yield
-        else
-            Thread.new do
-                yield
-            end
-        end
+  def spawn_thread(last = false, &block)
+    if last
+      yield
+    else
+      Thread.new(&block)
     end
-    def rack_handler()
-        Rackup::Handler::WEBrick
-    end
+  end
+
+  def rack_handler
+    Rackup::Handler::WEBrick
+  end
 end
 
-$nat = Nat.new("rat")
+$nat = Nat.new('rat')
 
 # global address is 192.168.0.137
 $nat.global_addr = "\xc0\xa8\x0\x89".b
 
 # create TCP, UDP, ICMP Echo tables
-$nat.tcp_table = SymmetricNATTable.new("tcp")
+$nat.tcp_table = SymmetricNATTable.new('tcp')
 $nat.tcp_table.idle_timeout = 300
-$nat.udp_table = ConeNATTable.new("udp")
+$nat.udp_table = ConeNATTable.new('udp')
 $nat.udp_table.idle_timeout = 30
-$nat.icmp_echo_table = SymmetricNATTable.new("icmp-echo")
+$nat.icmp_echo_table = SymmetricNATTable.new('icmp-echo')
 $nat.icmp_echo_table.idle_timeout = 30
 
 # setup ports and logger for each table
-for table in [$nat.tcp_table, $nat.udp_table, $nat.icmp_echo_table]
-    table.global_ports.push *(9000 .. 9999)
-    table.get_logfp = Proc.new do
-        if $logfp.nil?
-            $logfp = open("rat.log", "a")
-        end
-        $logfp
-    end
+[$nat.tcp_table, $nat.udp_table, $nat.icmp_echo_table].each do |table|
+  table.global_ports.push(*(9000..9999))
+  table.get_logfp = proc do
+    $logfp = open('rat.log', 'a') if $logfp.nil?
+    $logfp
+  end
 end
 
 # the nat thread (that restarts itself upon exception)
 spawn_thread do
+  loop do
     loop do
-        begin
-            loop do
-                $nat.run
-            end
-        rescue => e
-            p e.full_message(:highlight => false)
-        end
+      $nat.run
     end
+  rescue StandardError => e
+    p e.full_message(highlight: false)
+  end
 end
 
 # Web UI thread
 spawn_thread do
-    rack_handler.run(Proc.new {|env| $nat.webapp(env) }, :Host => '0.0.0.0', :Port => 8080)
+  rack_handler.run(proc do |env| $nat.webapp(env) end, Host: '0.0.0.0', Port: 8080)
 end
 
 # upon SIGHUP, reset logger and webif state so that they would be reinitialized
-Signal.trap("HUP") do
-    $logfp = nil
-    $nat.reload_webapp
+Signal.trap('HUP') do
+  $logfp = nil
+  $nat.reload_webapp
 end
 
 # start IRB on the main thread
 spawn_thread(true) do
-    IRB.start(__FILE__)
+  IRB.start(__FILE__)
 end
