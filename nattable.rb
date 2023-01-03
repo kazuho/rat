@@ -78,6 +78,10 @@ class NATTable
     entry
   end
 
+  def empty?
+    @locals.empty?
+  end
+
   def size
     @locals.size
   end
