@@ -28,8 +28,8 @@ class Nat
       table = @udp_table
     when ICMPEcho
       table = @icmp_echo_table
-    when ICMPWithOriginalPacket
-      handle_icmp_with_original_packet(packet) if !egress?(packet)
+    when ICMPError
+      handle_icmp_error(packet) if !egress?(packet)
       return
     end
     return if table.nil?
@@ -57,7 +57,7 @@ class Nat
     end
   end
 
-  def handle_icmp_with_original_packet(packet)
+  def handle_icmp_error(packet)
     case packet.l4.original.l4
     when TCP
       table = @tcp_table

@@ -18,7 +18,7 @@ loop do
 
   packet.src_addr = FAKE_ADDR
   packet.dest_addr = TRUE_ADDR
-  if packet.l4.is_a?(ICMPDestUnreach)
+  if packet.l4.is_a?(ICMPError)
     packet.l4.original.src_addr = TRUE_ADDR
     packet.l4.original.dest_addr = FAKE_ADDR
   end
