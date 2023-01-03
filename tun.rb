@@ -3,7 +3,7 @@
 require 'socket'
 
 class IP
-  attr_accessor :bytes, :proto, :src_addr, :dest_addr, :l4_start, :l4
+  attr_accessor :bytes, :l4_start, :l4, :pseudo_header, :orig_pseudo_header
 
   def initialize(bytes)
     @bytes = bytes
@@ -11,6 +11,7 @@ class IP
 
   def _parse(allow_partial)
     bytes = @bytes
+
     return nil if bytes.length < 20
     return nil if bytes.getbyte(0) != 0x45
     # tos?
@@ -18,15 +19,18 @@ class IP
     # ignore identification
     return nil if decode_u16(6) & 0xbfff != 0 # ignore fragments
 
-    # ttl: 8
-    @proto = bytes.getbyte(9)
-    # checksum 10..11
-    @src_addr = bytes[12..15]
-    @dest_addr = bytes[16..19]
-
     @l4_start = 20
 
-    case @proto
+    proto = bytes.getbyte(9)
+
+    # build pseudo header and retain it
+    pseudo_header = bytes[12..19] + "\0\0\0\0".b
+    pseudo_header.setbyte(9, proto)
+    IP.encode_u16(pseudo_header, 10, bytes.length - 20)
+    @pseudo_header = pseudo_header
+    @orig_pseudo_header = pseudo_header.dup
+
+    case proto
     when UDP::PROTOCOL_ID
       self.l4 = UDP.parse(self, allow_partial)
     when TCP::PROTOCOL_ID
@@ -42,26 +46,39 @@ class IP
     IP.new(bytes)._parse(allow_partial)
   end
 
+  def src_addr
+    @pseudo_header[0..3]
+  end
+
+  def src_addr=(x)
+    @pseudo_header[0..3] = x
+  end
+
+  def dest_addr
+    @pseudo_header[4..7]
+  end
+
+  def dest_addr=(x)
+    @pseudo_header[4..7] = x
+  end
+
   def tuple
-    @src_addr + @dest_addr
+    @pseudo_header[0..7]
   end
 
   def apply
     bytes = @bytes
 
-    orig_l3_tuple = bytes[12..19]
-
     # decrement TTL
     bytes.setbyte(8, bytes.getbyte(8) - 1)
 
-    bytes[12..15] = @src_addr
-    bytes[16..19] = @dest_addr
+    bytes[12..19] = @pseudo_header[0..7]
 
     bytes[10..11] = "\0\0"
     checksum = IP.checksum(bytes, 0, l4_start)
     encode_u16(10, checksum)
 
-    l4.apply(self, orig_l3_tuple)
+    l4.apply(self)
   end
 
   def decode_u16(off)
@@ -143,13 +160,13 @@ class TCPUDP
     self
   end
 
-  def _apply(packet, orig_l3_tuple, checksum_offset)
+  def _apply(packet, checksum_offset)
     bytes = packet.bytes
     l4_start = packet.l4_start
 
-    orig_bytes = orig_l3_tuple + bytes[l4_start..l4_start + 3]
+    orig_bytes = packet.orig_pseudo_header + bytes[l4_start..l4_start + 3]
     bytes[l4_start..l4_start + 3] = @tuple
-    new_bytes = packet.tuple + @tuple
+    new_bytes = packet.pseudo_header + @tuple
 
     return unless bytes.length >= l4_start + checksum_offset + 2
 
@@ -166,8 +183,8 @@ class UDP < TCPUDP
     UDP.new._parse(packet, allow_partial ? 4 : 8)
   end
 
-  def apply(packet, orig_l3_tuple)
-    _apply(packet, orig_l3_tuple, 6)
+  def apply(packet)
+    _apply(packet, 6)
   end
 end
 
@@ -178,8 +195,8 @@ class TCP < TCPUDP
     TCP.new._parse(packet, allow_partial ? 4 : 20)
   end
 
-  def apply(packet, orig_l3_tuple)
-    _apply(packet, orig_l3_tuple, 16)
+  def apply(packet)
+    _apply(packet, 16)
   end
 end
 
@@ -219,7 +236,7 @@ class ICMP
     icmp._parse(packet)
   end
 
-  def apply(packet, orig_l3_tuple)
+  def apply(packet)
     # ICMP does not use pseudo headers
   end
 
@@ -254,7 +271,7 @@ class ICMPEcho < ICMP
     [src_port, dest_port].pack('n*')
   end
 
-  def apply(packet, orig_l3_tuple)
+  def apply(packet)
     packet.encode_u16(packet.l4_start + 4, type == TYPE_ECHO ? @src_port : @dest_port)
     ICMP.recalculate_checksum(packet)
   end
@@ -272,7 +289,7 @@ class ICMPWithOriginalPacket < ICMP
     self
   end
 
-  def apply(packet, _orig_l3_tuple)
+  def apply(packet)
     @original.apply
 
     # overwrite packet image with orig packet being built
