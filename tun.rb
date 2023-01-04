@@ -137,7 +137,7 @@ class IP
     @bytes = bytes
   end
 
-  def _parse(allow_partial)
+  def _parse(icmp_payload)
     bytes = @bytes
 
     # mimimum size for IPv4
@@ -158,9 +158,9 @@ class IP
 
     case @proto
     when UDP::PROTOCOL_ID
-      self.l4 = UDP.parse(self, allow_partial)
+      self.l4 = UDP.parse(self, icmp_payload)
     when TCP::PROTOCOL_ID
-      self.l4 = TCP.parse(self, allow_partial)
+      self.l4 = TCP.parse(self, icmp_payload)
     when @version.icmp_protocol_id
       self.l4 = ICMP.parse(self)
     end
@@ -168,8 +168,8 @@ class IP
     self
   end
 
-  def self.parse(bytes, allow_partial = false)
-    IP.new(bytes)._parse(allow_partial)
+  def self.parse(bytes, icmp_payload = false)
+    IP.new(bytes)._parse(icmp_payload)
   end
 
   def src_addr
@@ -307,8 +307,8 @@ end
 class UDP < TCPUDP
   PROTOCOL_ID = 17
 
-  def self.parse(packet, allow_partial)
-    UDP.new._parse(packet, allow_partial ? 4 : 8)
+  def self.parse(packet, icmp_payload)
+    UDP.new._parse(packet, icmp_payload ? 4 : 8)
   end
 
   def apply(packet)
@@ -319,8 +319,8 @@ end
 class TCP < TCPUDP
   PROTOCOL_ID = 6
 
-  def self.parse(packet, allow_partial)
-    TCP.new._parse(packet, allow_partial ? 4 : 20)
+  def self.parse(packet, icmp_payload)
+    TCP.new._parse(packet, icmp_payload ? 4 : 20)
   end
 
   def apply(packet)
