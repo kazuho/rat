@@ -103,29 +103,17 @@ class IP
 
       return false if bytes.length < 40
 
-      l4_start = 40
       proto = bytes.getbyte(6)
 
-      # strip all extensions (until we decide to forward them)
-      while EXTENSIONS[proto]
-        return false if bytes.length < l4_start + 8
+      # drop packets containing IPv6 extensions (RFC 7045 grudgingly acknowledges existence of such middleboxes)
+      return false if EXTENSIONS[proto]
 
-        proto = bytes.getbyte(l4_start)
-        extlen = bytes.getbyte(l4_start + 1)
-        l4_start += 8 + extlen * 8
-      end
-      if l4_start != 40
-        bytes[40..] = bytes[l4_start..]
-        bytes.setbyte(6, proto)
-        l4_start = 40
-      end
-
-      packet.l4_start = l4_start
       packet.proto = proto
+      packet.l4_start = 40
 
       # build pseudo header
       pseudo_header = bytes[8..39] + IP::ZERO_BYTES8
-      IP.encode_u16(pseudo_header, 34, bytes.length - l4_start)
+      IP.encode_u16(pseudo_header, 34, bytes.length - 40)
       pseudo_header.setbyte(39, proto)
       packet.pseudo_header = pseudo_header
 
