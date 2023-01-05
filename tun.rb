@@ -12,6 +12,16 @@ class IP
       4
     end
 
+    def self.l4_length(pseudo_header)
+      pseudo_header[10..11].unpack1('n')
+    end
+
+    def self.set_l4_length(pseudo_header, packet_bytes, len)
+      len = [len].pack('n')
+      pseudo_header[10..11] = len
+      packet_bytes[2..3] = len
+    end
+
     def self.icmp_protocol_id
       ICMP::V4_PROTOCOL_ID
     end
@@ -20,16 +30,16 @@ class IP
       false
     end
 
-    def self.new_icmp(type)
+    def self.new_icmp(packet, type)
       case type
       when ICMPEcho::V4_TYPE_REQUEST
-        ICMPEcho.new(true)
+        ICMPEcho.new(packet, true)
       when ICMPEcho::V4_TYPE_REPLY
-        ICMPEcho.new(false)
+        ICMPEcho.new(packet, false)
       when ICMPError::V4_TYPE_DEST_UNREACH, ICMPError::V4_TYPE_TIME_EXCEEDED
-        ICMPError.new
+        ICMPError.new(packet)
       else
-        ICMP.new
+        ICMP.new(packet)
       end
     end
 
@@ -77,6 +87,16 @@ class IP
       16
     end
 
+    def self.l4_length(pseudo_header)
+      pseudo_header[34..35].unpack1('n')
+    end
+
+    def self.set_l4_length(pseudo_header, packet_bytes, len)
+      len = [len].pack('n')
+      pseudo_header[34..35] = len
+      packet_bytes[4..5] = len
+    end
+
     def self.icmp_protocol_id
       ICMP::V6_PROTOCOL_ID
     end
@@ -85,16 +105,16 @@ class IP
       true
     end
 
-    def self.new_icmp(type)
+    def self.new_icmp(packet, type)
       case type
       when ICMPEcho::V6_TYPE_REQUEST
-        ICMPEcho.new(true)
+        ICMPEcho.new(packet, true)
       when ICMPEcho::V6_TYPE_REPLY
-        ICMPEcho.new(false)
+        ICMPEcho.new(packet, false)
       when ICMPError::V6_TYPE_DEST_UNREACH, ICMPError::V6_TYPE_PACKET_TOO_BIG, ICMPError::V6_TYPE_TIME_EXCEEDED
-        ICMPError.new
+        ICMPError.new(packet)
       else
-        ICMP.new
+        ICMP.new(packet)
       end
     end
 
@@ -197,9 +217,17 @@ class IP
     @pseudo_header.byteslice(0, addr_size * 2)
   end
 
+  def l4_length
+    @version.l4_length(@pseudo_header)
+  end
+
+  def l4_length=(x)
+    @version.set_l4_length(@pseudo_header, @bytes, x)
+  end
+
   def apply
     @version.apply(self)
-    l4.apply(self)
+    l4.apply
   end
 
   def decode_u16(off)
@@ -259,42 +287,38 @@ class IP
 end
 
 class TCPUDP
-  attr_accessor :tuple
+  def initialize(packet)
+    @packet = packet
+    @orig_tuple = packet.bytes.byteslice(packet.l4_start, 4)
+  end
 
   def src_port
-    @tuple[0..1].unpack1('n')
+    @packet.decode_u16(@packet.l4_start)
   end
 
   def src_port=(n)
-    IP.encode_u16(@tuple, 0, n)
+    @packet.encode_u16(@packet.l4_start, n)
   end
 
   def dest_port
-    @tuple[2..3].unpack1('n')
+    @packet.decode_u16(@packet.l4_start + 2)
   end
 
   def dest_port=(n)
-    IP.encode_u16(@tuple, 2, n)
+    @packet.encode_u16(@packet.l4_start + 2, n)
   end
 
-  def _parse(packet, min_len)
-    bytes = packet.bytes
-    off = packet.l4_start
-
-    return nil if bytes.length - off < min_len
-
-    @tuple = packet.bytes[off..off + 3]
-
-    self
+  def tuple
+    @packet.bytes.byteslice(@packet.l4_start, 4)
   end
 
-  def _apply(packet, checksum_offset)
+  def _apply(checksum_offset)
+    packet = @packet
     bytes = packet.bytes
     l4_start = packet.l4_start
 
-    orig_bytes = packet.orig_pseudo_header + bytes[l4_start..l4_start + 3]
-    bytes[l4_start..l4_start + 3] = @tuple
-    new_bytes = packet.pseudo_header + @tuple
+    orig_bytes = packet.orig_pseudo_header + @orig_tuple
+    new_bytes = packet.pseudo_header + bytes.byteslice(l4_start, 4)
 
     return unless bytes.length >= l4_start + checksum_offset + 2
 
@@ -306,25 +330,155 @@ end
 
 class UDP < TCPUDP
   PROTOCOL_ID = 17
+  CHECKSUM_OFFSET = 6
 
   def self.parse(packet, icmp_payload)
-    UDP.new._parse(packet, icmp_payload ? 4 : 8)
+    return nil if packet.bytes.length < packet.l4_start + (icmp_payload ? 4 : 8)
+
+    UDP.new(packet)
   end
 
-  def apply(packet)
-    _apply(packet, 6)
+  def apply
+    _apply(CHECKSUM_OFFSET)
   end
 end
 
 class TCP < TCPUDP
   PROTOCOL_ID = 6
+  DATA_OFFSET_OFFSET = 12
+  CHECKSUM_OFFSET = 16
+  OPTION_KIND_END = 0
+  OPTION_KIND_NOOP = 1
+  OPTION_KIND_MSS = 2
+  FLAG_FIN = 0x01
+  FLAG_SYN = 0x02
+  FLAG_RST = 0x04
+  FLAG_PST = 0x08
+  FLAG_ACK = 0x10
+  FLAG_URG = 0x20
+  FLAG_ECE = 0x40
+  FLAG_CWR = 0x80
 
-  def self.parse(packet, icmp_payload)
-    TCP.new._parse(packet, icmp_payload ? 4 : 20)
+  attr_reader :flags
+
+  def initialize(packet, flags)
+    super(packet)
+    @flags = flags
   end
 
-  def apply(packet)
-    _apply(packet, 16)
+  def self.parse(packet, icmp_payload)
+    bytes = packet.bytes
+    l4_start = packet.l4_start
+    return nil if bytes.length < l4_start + (icmp_payload ? 4 : 20)
+
+    flags = bytes.getbyte(l4_start + 13)
+    TCP.new(packet, flags)
+  end
+
+  def max_segment_size
+    mss = nil
+    each_option do |kind, value|
+      if kind == 2 && value.length == 2
+        mss = value.unpack1('n') if kind == 2 && value.length == 2
+        break
+      end
+    end
+    mss
+  end
+
+  def max_segment_size=(newval)
+    oldoff = _calc_l7_start
+    oldlen = 0
+    each_option do |kind, value, off|
+      next unless kind == OPTION_KIND_MSS && value.length == 2
+
+      oldoff = off
+      oldlen = 4
+      break
+    end
+    if newval
+      _splice_option(oldoff, oldlen, OPTION_KIND_MSS, [newval].pack('n'))
+    else
+      _splice_option(oldoff, oldlen, nil, nil)
+    end
+
+    newval
+  end
+
+  def apply
+    _apply(16)
+  end
+
+  def each_option
+    bytes = @packet.bytes
+
+    off = @packet.l4_start + 20
+    l7_start = _calc_l7_start || 0
+    while off < l7_start
+      optkind = bytes.getbyte(off)
+      case optkind
+      when OPTION_KIND_END
+        break
+      when OPTION_KIND_NOOP
+        off += 1
+      else
+        # other TCP Options are TLV
+        optlen = bytes.getbyte(off + 1)
+        break if optlen < 2
+        break if off + optlen > l7_start
+
+        optval = bytes.byteslice(off + 2, optlen - 2)
+        yield optkind, optval, off
+        off += optlen
+      end
+    end
+  end
+
+  def _splice_option(off, len, optkind, optval)
+    bytes = @packet.bytes
+    l4_start = @packet.l4_start
+    l7_start = _calc_l7_start
+    return false unless l7_start
+
+    replace = if optkind
+                optkind.chr + (optval.length + 2).chr + optval
+              else
+                ''
+              end
+
+    # rewrite Option, retaining the bytes for checksum calculation
+    orig_checksum_bytes = bytes.byteslice(off, len)
+    new_checksum_bytes = replace
+    bytes.bytesplice(off, len, replace)
+
+    # make necessary adjustments if TCP header size and hence the packet size have changed
+    if len != replace.length
+      @packet.l4_length += replace.length - len
+      new_data_offset = (l7_start - l4_start) + (replace.length - len)
+      raise 'have to adjust padding but that is not implemented yet' if new_data_offset % 4 != 0
+
+      orig_checksum_bytes += bytes.byteslice(l4_start + DATA_OFFSET_OFFSET, 2)
+      bytes.setbyte(l4_start + DATA_OFFSET_OFFSET,
+                    (new_data_offset / 4) << 4 | (bytes.getbyte(l4_start + DATA_OFFSET_OFFSET) & 0xf))
+      new_checksum_bytes += bytes.byteslice(l4_start + DATA_OFFSET_OFFSET, 2)
+    end
+
+    checksum = bytes.byteslice(l4_start + CHECKSUM_OFFSET, 2).unpack1('n')
+    checksum = IP.checksum_adjust(checksum, orig_checksum_bytes, new_checksum_bytes)
+    IP.encode_u16(bytes, l4_start + CHECKSUM_OFFSET, checksum)
+
+    true
+  end
+
+  def _calc_l7_start
+    bytes = @packet.bytes
+    l4_start = @packet.l4_start
+    return nil if bytes.length < l4_start + 20
+
+    l7_start = l4_start + (bytes.getbyte(l4_start + DATA_OFFSET_OFFSET) >> 4) * 4
+    return nil if bytes.length < l7_start
+
+    l7_start
   end
 end
 
@@ -334,9 +488,13 @@ class ICMP
 
   attr_reader :type, :code
 
-  def _parse(packet)
-    bytes = packet.bytes
-    off = packet.l4_start
+  def initialize(packet)
+    @packet = packet
+  end
+
+  def _parse
+    bytes = @packet.bytes
+    off = @packet.l4_start
 
     @type = bytes.getbyte(off)
     @code = bytes.getbyte(off + 1)
@@ -351,11 +509,11 @@ class ICMP
     return nil if bytes.length - off < 8
 
     type = bytes.getbyte(off)
-    icmp = packet.version.new_icmp(type)
-    icmp._parse(packet)
+    icmp = packet.version.new_icmp(packet, type)
+    icmp._parse
   end
 
-  def apply(packet)
+  def apply
     # ICMP does not use pseudo headers
   end
 
@@ -375,15 +533,15 @@ class ICMPEcho < ICMP
 
   attr_accessor :src_port, :dest_port
 
-  def initialize(is_req)
-    super()
+  def initialize(packet, is_req)
+    super(packet)
     @is_req = is_req
   end
 
-  def _parse(packet)
-    return nil if super(packet).nil?
+  def _parse
+    super
 
-    port = packet.decode_u16(packet.l4_start + 4)
+    port = @packet.decode_u16(@packet.l4_start + 4)
     if @is_req
       @src_port = port
       @dest_port = 0
@@ -399,9 +557,9 @@ class ICMPEcho < ICMP
     [src_port, dest_port].pack('n*')
   end
 
-  def apply(packet)
-    packet.encode_u16(packet.l4_start + 4, @is_req ? @src_port : @dest_port)
-    ICMP.recalculate_checksum(packet)
+  def apply
+    @packet.encode_u16(@packet.l4_start + 4, @is_req ? @src_port : @dest_port)
+    ICMP.recalculate_checksum(@packet)
   end
 end
 
@@ -414,22 +572,22 @@ class ICMPError < ICMP
 
   attr_accessor :original
 
-  def _parse(packet)
-    return nil if super(packet).nil?
+  def _parse
+    super
 
-    @original = IP.parse(packet.bytes[packet.l4_start + 8..], true)
-    return nil if @original.nil? || @original.version != packet.version || @original.l4.nil?
+    @original = IP.parse(@packet.bytes[@packet.l4_start + 8..], true)
+    return nil if @original.nil? || @original.version != @packet.version || @original.l4.nil?
 
     self
   end
 
-  def apply(packet)
+  def apply
     @original.apply
 
     # overwrite packet image with orig packet being built
-    packet.bytes[packet.l4_start + 8..] = @original.bytes
+    @packet.bytes[@packet.l4_start + 8..] = @original.bytes
 
-    ICMP.recalculate_checksum(packet)
+    ICMP.recalculate_checksum(@packet)
   end
 end
 
