@@ -22,6 +22,5 @@ loop do
     packet.l4.original.src_addr = TRUE_ADDR
     packet.l4.original.dest_addr = FAKE_ADDR
   end
-  packet.apply
   tun.write(packet)
 end

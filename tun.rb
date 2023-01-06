@@ -609,6 +609,7 @@ class Tun
   end
 
   def write(packet)
+    packet.apply
     @tundev.syswrite(packet.bytes)
   end
 end

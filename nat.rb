@@ -40,8 +40,6 @@ class Nat
       packet.l4.dest_port = entry.local_port
     end
 
-    packet.apply
-
     packet
   end
 
@@ -65,8 +63,6 @@ class Nat
     packet.l4.original.src_addr = entry.local_addr
     packet.l4.original.l4.src_port = entry.local_port
     packet.dest_addr = entry.local_addr
-
-    packet.apply
 
     packet
   end
