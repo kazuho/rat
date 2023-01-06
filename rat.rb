@@ -36,7 +36,7 @@ else
   end
 end
 
-$nat = Nat.new('rat')
+$nat = Nat.new
 
 # global address is 192.168.0.137
 $nat.global_addr = "\xc0\xa8\x0\x89".b
@@ -58,11 +58,17 @@ $nat.icmp_echo_table.idle_timeout = 30
   end
 end
 
+tun = Tun.new('rat')
+
 # the nat thread (that restarts itself upon exception)
 spawn_thread do
   loop do
     loop do
-      $nat.run
+      packet = tun.read
+      next unless packet
+      packet = $nat.transform(packet)
+      next unless packet
+      tun.write(packet)
     end
   rescue StandardError => e
     p e.full_message(highlight: false)

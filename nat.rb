@@ -1,26 +1,15 @@
 # frozen_string_literal: true
 
-require './tun'
-
 class Nat
   attr_accessor :global_addr, :tcp_table, :udp_table, :icmp_echo_table
-
-  def initialize(devname)
-    @tun = Tun.new(devname)
-  end
 
   def egress?(packet)
     packet.dest_addr != @global_addr
   end
 
-  def run
-    packet = @tun.read
+  def transform(packet)
     return unless packet&.l4
 
-    handle_packet(packet)
-  end
-
-  def handle_packet(packet)
     case packet.l4
     when TCP
       table = @tcp_table
@@ -29,32 +18,31 @@ class Nat
     when ICMPEcho
       table = @icmp_echo_table
     when ICMPError
-      handle_icmp_error(packet) if !egress?(packet)
-      return
+      return handle_icmp_error(packet) unless egress?(packet)
     end
     return if table.nil?
 
     if egress?(packet)
       entry = table.lookup_egress(packet)
-      if entry
-        entry.packets_sent += 1
-        entry.bytes_sent += packet.bytes.length
-        packet.src_addr = @global_addr
-        packet.l4.src_port = entry.global_port
-        packet.apply
-        @tun.write(packet)
-      end
+      return unless entry
+
+      entry.packets_sent += 1
+      entry.bytes_sent += packet.bytes.length
+      packet.src_addr = @global_addr
+      packet.l4.src_port = entry.global_port
     else
       entry = table.lookup_ingress(packet)
-      if entry
-        entry.packets_received += 1
-        entry.bytes_received += packet.bytes.length
-        packet.dest_addr = entry.local_addr
-        packet.l4.dest_port = entry.local_port
-        packet.apply
-        @tun.write(packet)
-      end
+      return unless entry
+
+      entry.packets_received += 1
+      entry.bytes_received += packet.bytes.length
+      packet.dest_addr = entry.local_addr
+      packet.l4.dest_port = entry.local_port
     end
+
+    packet.apply
+
+    packet
   end
 
   def handle_icmp_error(packet)
@@ -79,7 +67,8 @@ class Nat
     packet.dest_addr = entry.local_addr
 
     packet.apply
-    @tun.write(packet)
+
+    packet
   end
 
   def webapp(env)
