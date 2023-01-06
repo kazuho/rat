@@ -66,8 +66,12 @@ spawn_thread do
     loop do
       packet = tun.read
       next unless packet
+
+      # packet.l4.max_segment_size = 1400 if packet.l4.is_a?(TCP) && (packet.l4.flags & TCP::FLAG_SYN) != 0
+
       packet = $nat.transform(packet)
       next unless packet
+
       tun.write(packet)
     end
   rescue StandardError => e
