@@ -164,19 +164,48 @@ class SymmetricNATTable < NATTable
   end
 
   def local_key_from_packet(packet)
-    packet.tuple + packet.l4.tuple
+    l3_tuple = packet.tuple
+    l3_tuple_size = l3_tuple.size
+
+    b = IO::Buffer.new(l3_tuple_size + 4)
+    b.copy(l3_tuple)
+    b.copy(packet.l4.tuple, l3_tuple_size)
+
+    b.get_string
   end
 
   def local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)
-    local_addr + remote_addr + [local_port, remote_port].pack('n*')
+    addr_size = local_addr.size
+
+    b = IO::Buffer.new(addr_size * 2 + 4)
+    b.copy(local_addr)
+    b.copy(remote_addr, addr_size)
+    b.set_value(:U16, addr_size * 2, local_port)
+    b.set_value(:U16, addr_size * 2 + 2, remote_port)
+
+    b.get_string
   end
 
   def remote_key_from_packet(packet)
-    packet.src_addr + packet.l4.tuple
+    src_addr = packet.src_addr
+    addr_size = src_addr.size
+
+    b = IO::Buffer.new(addr_size + 4)
+    b.copy(src_addr)
+    b.copy(packet.l4.tuple, addr_size)
+
+    b.get_string
   end
 
   def remote_key_from_tuple(global_port, remote_addr, remote_port)
-    remote_addr + [remote_port, global_port].pack('n*')
+    addr_size = remote_addr.size
+
+    b = IO::Buffer.new(addr_size + 4)
+    b.copy(remote_addr)
+    b.set_value(:U16, addr_size, remote_port)
+    b.set_value(:U16, addr_size + 2, global_port)
+
+    b.get_string
   end
 end
 
@@ -195,11 +224,17 @@ class ConeNATTable < NATTable
   end
 
   def local_key_from_packet(packet)
-    packet.src_addr + [packet.l4.src_port].pack('n')
+    local_key_from_tuple(packet.src_addr, packet.l4.src_port, nil, nil)
   end
 
   def local_key_from_tuple(local_addr, local_port, _remote_addr, _remote_port)
-    local_addr + [local_port].pack('n')
+    addr_size = local_addr.size
+
+    b = IO::Buffer.new(addr_size + 2)
+    b.copy(local_addr)
+    b.set_value(:U16, addr_size, local_port)
+
+    b.get_string
   end
 
   def remote_key_from_packet(packet)
