@@ -121,10 +121,10 @@ class NATTable
 
   def _insert(local_addr, local_port, global_port, remote_addr, remote_port)
     entry = Entry.new
-    entry.local_addr = local_addr
+    entry.local_addr = local_addr.dup
     entry.local_port = local_port
     entry.global_port = global_port
-    entry.remote_addr = remote_addr
+    entry.remote_addr = remote_addr.dup
     entry.remote_port = remote_port
 
     entry.link(@anchor)

@@ -192,7 +192,7 @@ class IP
 
   def src_addr
     addr_size = @version.addr_size
-    @pseudo_header.slice(0, addr_size).dup # cannot freeze a slice?
+    @pseudo_header.slice(0, addr_size)
   end
 
   def src_addr=(x)
@@ -202,7 +202,7 @@ class IP
 
   def dest_addr
     addr_size = @version.addr_size
-    @pseudo_header.slice(addr_size, addr_size).dup
+    @pseudo_header.slice(addr_size, addr_size)
   end
 
   def dest_addr=(x)
@@ -212,7 +212,7 @@ class IP
 
   def tuple
     addr_size = @version.addr_size
-    @pseudo_header.slice(0, addr_size * 2).dup
+    @pseudo_header.slice(0, addr_size * 2)
   end
 
   def l4_length
