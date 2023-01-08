@@ -3,9 +3,8 @@
 require 'socket'
 
 class IP
-  ZERO_BYTES2 = "\0\0".b
-  ZERO_BYTES4 = "\0\0\0\0".b
-  ZERO_BYTES8 = "\0\0\0\0\0\0\0\0".b
+  ZERO_BYTES12 = ("\0" * 12).b
+  ZERO_BYTES40 = ("\0" * 40).b
 
   class V4
     def self.addr_size
@@ -43,40 +42,38 @@ class IP
       end
     end
 
-    def self.parse(packet)
-      bytes = packet.bytes
-
-      return false if bytes.getbyte(0) != 0x45
+    def self.parse(packet, bytes)
+      return false if bytes.get_value(:U8, 0) != 0x45
       # tos?
       # totlen?
       # ignore identification
-      return false if packet.decode_u16(6) & 0xbfff != 0 # ignore fragments
+      return false if bytes.get_value(:U16, 6) & 0xbfff != 0 # ignore fragments
 
       packet.l4_start = 20
 
-      proto = bytes.getbyte(9)
+      proto = bytes.get_value(:U8, 9)
       packet.proto = proto
 
       # build pseudo header
-      pseudo_header = bytes[12..19] + IP::ZERO_BYTES4
-      pseudo_header.setbyte(9, proto)
-      IP.encode_u16(pseudo_header, 10, bytes.length - 20)
+      pseudo_header = ZERO_BYTES12.dup
+      IO::Buffer.for(pseudo_header) do |b|
+        b.copy(bytes, 0, 8, 12)
+        b.set_value(:U8, 9, proto)
+        b.set_value(:U16, 10, bytes.size - 20)
+      end
       packet.pseudo_header = pseudo_header
 
       true
     end
 
-    def self.apply(packet)
-      bytes = packet.bytes
-
+    def self.apply(packet, bytes, pseudo_header)
       # decrement TTL
-      bytes.setbyte(8, bytes.getbyte(8) - 1)
+      bytes.set_value(:U8, 8, bytes.get_value(:U8, 8) - 1)
 
-      bytes[12..19] = packet.pseudo_header[0..7]
-
-      bytes[10..11] = IP::ZERO_BYTES2
+      bytes.copy(pseudo_header, 12, 8)
+      bytes.set_value(:U16, 10, 0)
       checksum = IP.checksum(bytes, 0, packet.l4_start)
-      packet.encode_u16(10, checksum)
+      bytes.set_value(:U16, 10, checksum)
     end
   end
 
@@ -118,12 +115,10 @@ class IP
       end
     end
 
-    def self.parse(packet)
-      bytes = packet.bytes
+    def self.parse(packet, bytes)
+      return false if bytes.size < 40
 
-      return false if bytes.length < 40
-
-      proto = bytes.getbyte(6)
+      proto = bytes.get_value(:U8, 6)
 
       # drop packets containing IPv6 extensions (RFC 7045 grudgingly acknowledges existence of such middleboxes)
       return false if EXTENSIONS[proto]
@@ -132,21 +127,22 @@ class IP
       packet.l4_start = 40
 
       # build pseudo header
-      pseudo_header = bytes[8..39] + IP::ZERO_BYTES8
-      IP.encode_u16(pseudo_header, 34, bytes.length - 40)
-      pseudo_header.setbyte(39, proto)
+      pseudo_header = ZERO_BYTES40.dup
+      IO::Buffer.for(pseudo_header) do |ph|
+        ph.copy(bytes, 0, 32, 8)
+        ph.set_value(:U32, 32, bytes.size - 40)
+        ph.set_value(:U8, 39, proto)
+      end
       packet.pseudo_header = pseudo_header
 
       true
     end
 
-    def self.apply(packet)
-      bytes = packet.bytes
-
+    def self.apply(packet, bytes, pseudo_header)
       # decrement hop limit
-      bytes.setbyte(7, bytes.getbyte(7) - 1)
+      bytes.set_value(:U8, 7, bytes.get_value(:U8, 7) - 1)
 
-      bytes[8..39] = packet.pseudo_header[0..31]
+      bytes.copy(pseudo_header, 8, 32)
     end
   end
 
@@ -157,13 +153,11 @@ class IP
     @bytes = bytes
   end
 
-  def _parse(icmp_payload)
-    bytes = @bytes
-
+  def _parse(bytes, icmp_payload)
     # mimimum size for IPv4
-    return nil if bytes.length < 20
+    return nil if bytes.size < 20
 
-    case bytes.getbyte(0) >> 4
+    case bytes.get_value(:U8, 0) >> 4
     when 4
       @version = V4
     when 6
@@ -172,7 +166,7 @@ class IP
       return nil
     end
 
-    return nil unless @version.parse(self)
+    return nil unless @version.parse(self, bytes)
 
     @orig_pseudo_header = @pseudo_header.dup
 
@@ -189,7 +183,7 @@ class IP
   end
 
   def self.parse(bytes, icmp_payload = false)
-    IP.new(bytes)._parse(icmp_payload)
+    IP.new(bytes)._parse(IO::Buffer.for(bytes), icmp_payload)
   end
 
   def src_addr
@@ -226,7 +220,9 @@ class IP
   end
 
   def apply
-    @version.apply(self)
+    IO::Buffer.for(@bytes) do |bytes|
+      @version.apply(self, bytes, IO::Buffer.for(@pseudo_header))
+    end
     l4.apply
   end
 
@@ -246,31 +242,45 @@ class IP
 
   def self.checksum(bytes, from = nil, len = nil)
     from = 0 if from.nil?
-    len = bytes.length - from if len.nil?
-    to = from + len - 1
+    len = bytes.size - from if len.nil?
 
-    sum = bytes[from..to].unpack('n*').sum
-    sum += bytes.getbyte(to) * 256 if len.odd?
+    sum = 0
+    to = from + len / 2 * 2
+    while from < to
+      sum += bytes.get_value(:U16, from)
+      from += 2
+    end
+    sum += bytes.get_value(:U8, from) * 256 if len.odd?
+
     ~((sum >> 16) + sum) & 0xffff
   end
 
   # fom RFC 3022 4.2
   def self.checksum_adjust(sum, old_bytes, new_bytes)
     sum = ~sum & 0xffff
-    old_bytes.unpack('n*').each do |u16|
-      sum -= u16
+
+    off = 0
+    len = old_bytes.size
+    while off < len
+      sum -= old_bytes.get_value(:U16, off)
       if sum <= 0
         sum -= 1
         sum &= 0xffff
       end
+      off += 2
     end
-    new_bytes.unpack('n*').each do |u16|
-      sum += u16
+
+    off = 0
+    len = new_bytes.size
+    while off < len
+      sum += new_bytes.get_value(:U16, off)
       if sum >= 0x10000
         sum += 1
         sum &= 0xffff
       end
+      off += 2
     end
+
     ~sum & 0xffff
   end
 
@@ -323,7 +333,7 @@ class TCPUDP
     return unless bytes.length >= l4_start + checksum_offset + 2
 
     checksum = packet.decode_u16(l4_start + checksum_offset)
-    checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
+    checksum = IP.checksum_adjust(checksum, IO::Buffer.for(orig_bytes), IO::Buffer.for(new_bytes))
     packet.encode_u16(l4_start + checksum_offset, checksum)
   end
 end
@@ -464,7 +474,7 @@ class TCP < TCPUDP
     end
 
     checksum = bytes.byteslice(l4_start + CHECKSUM_OFFSET, 2).unpack1('n')
-    checksum = IP.checksum_adjust(checksum, orig_checksum_bytes, new_checksum_bytes)
+    checksum = IP.checksum_adjust(checksum, IO::Buffer.for(orig_checksum_bytes), IO::Buffer.for(new_checksum_bytes))
     IP.encode_u16(bytes, l4_start + CHECKSUM_OFFSET, checksum)
 
     true
@@ -519,8 +529,11 @@ class ICMP
 
   def self.recalculate_checksum(packet)
     packet.encode_u16(packet.l4_start + 2, 0)
-    checksum = IP.checksum(packet.bytes, packet.l4_start)
-    checksum = IP.checksum_adjust(checksum, '', packet.pseudo_header) if packet.version.l4_use_pseudo_header?
+    checksum = IP.checksum(IO::Buffer.for(packet.bytes), packet.l4_start)
+    if packet.version.l4_use_pseudo_header?
+      checksum = IP.checksum_adjust(checksum, IO::Buffer.new,
+                                    IO::Buffer.for(packet.pseudo_header))
+    end
     packet.encode_u16(packet.l4_start + 2, checksum)
   end
 end
