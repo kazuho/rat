@@ -150,8 +150,8 @@ class IP
     end
   end
 
-  attr_accessor :bytes, :proto, :l4_start, :l4, :pseudo_header, :orig_pseudo_header
-  attr_reader :version
+  attr_accessor :bytes, :proto, :l4_start, :l4, :pseudo_header
+  attr_reader :version, :orig_pseudo_header_checksum
 
   def initialize(bytes)
     @bytes = bytes
@@ -174,7 +174,7 @@ class IP
 
     return nil unless @version.parse(self)
 
-    @orig_pseudo_header = @pseudo_header.dup
+    @orig_pseudo_header_checksum = @pseudo_header.unpack('n*').sum
 
     case @proto
     when UDP::PROTOCOL_ID
@@ -258,13 +258,13 @@ class IP
   end
 
   # fom RFC 3022 4.2
-  def self.checksum_adjust(sum, old_bytes, new_bytes)
+  def self.checksum_adjust(sum, old_cs, new_cs)
     sum = ~sum & 0xffff
-    sum -= old_bytes.unpack('n*').sum
+    sum -= old_cs
     while sum < 0
       sum = (sum & 0xffff) + (sum >> 16)
     end
-    sum += new_bytes.unpack('n*').sum
+    sum += new_cs
     while sum > 65535
       sum = (sum & 0xffff) + (sum >> 16)
     end
@@ -284,24 +284,24 @@ class IP
 end
 
 class TCPUDP
-  def initialize(packet)
-    @packet = packet
-    @orig_tuple = packet.bytes.byteslice(packet.l4_start, 4)
-  end
+  attr_reader :src_port, :dest_port
 
-  def src_port
-    @packet.decode_u16(@packet.l4_start)
+  def initialize(packet)
+    l4_start = packet.l4_start
+
+    @packet = packet
+    @src_port = packet.decode_u16(l4_start)
+    @dest_port = packet.decode_u16(l4_start + 2)
+    @orig_checksum = @src_port + @dest_port
   end
 
   def src_port=(n)
+    @src_port = n
     @packet.encode_u16(@packet.l4_start, n)
   end
 
-  def dest_port
-    @packet.decode_u16(@packet.l4_start + 2)
-  end
-
   def dest_port=(n)
+    @dest_port = n
     @packet.encode_u16(@packet.l4_start + 2, n)
   end
 
@@ -314,13 +314,13 @@ class TCPUDP
     bytes = packet.bytes
     l4_start = packet.l4_start
 
-    orig_bytes = packet.orig_pseudo_header + @orig_tuple
-    new_bytes = packet.pseudo_header + bytes.byteslice(l4_start, 4)
+    orig_checksum = packet.orig_pseudo_header_checksum + @orig_checksum
+    new_checksum = packet.pseudo_header.unpack("n*").sum + @src_port + @dest_port
 
     return unless bytes.length >= l4_start + checksum_offset + 2
 
     checksum = packet.decode_u16(l4_start + checksum_offset)
-    checksum = IP.checksum_adjust(checksum, orig_bytes, new_bytes)
+    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
     packet.encode_u16(l4_start + checksum_offset, checksum)
   end
 end
@@ -444,8 +444,8 @@ class TCP < TCPUDP
               end
 
     # rewrite Option, retaining the bytes for checksum calculation
-    orig_checksum_bytes = bytes.byteslice(off, len)
-    new_checksum_bytes = replace
+    orig_checksum = bytes.byteslice(off, len).unpack('n*').sum
+    new_checksum = replace.unpack('n*').sum
     bytes.bytesplice(off, len, replace)
 
     # make necessary adjustments if TCP header size and hence the packet size have changed
@@ -454,14 +454,14 @@ class TCP < TCPUDP
       new_data_offset = (l7_start - l4_start) + (replace.length - len)
       raise 'have to adjust padding but that is not implemented yet' if new_data_offset % 4 != 0
 
-      orig_checksum_bytes += bytes.byteslice(l4_start + DATA_OFFSET_OFFSET, 2)
+      orig_checksum += packet.decode_u16(l4_start + DATA_OFFSET_OFFSET)
       bytes.setbyte(l4_start + DATA_OFFSET_OFFSET,
                     (new_data_offset / 4) << 4 | (bytes.getbyte(l4_start + DATA_OFFSET_OFFSET) & 0xf))
-      new_checksum_bytes += bytes.byteslice(l4_start + DATA_OFFSET_OFFSET, 2)
+      new_checksum += packet.decode_u16(l4_start + DATA_OFFSET_OFFSET)
     end
 
     checksum = bytes.byteslice(l4_start + CHECKSUM_OFFSET, 2).unpack1('n')
-    checksum = IP.checksum_adjust(checksum, orig_checksum_bytes, new_checksum_bytes)
+    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
     IP.encode_u16(bytes, l4_start + CHECKSUM_OFFSET, checksum)
 
     true
@@ -517,7 +517,9 @@ class ICMP
   def self.recalculate_checksum(packet)
     packet.encode_u16(packet.l4_start + 2, 0)
     checksum = IP.checksum(packet.bytes, packet.l4_start)
-    checksum = IP.checksum_adjust(checksum, '', packet.pseudo_header) if packet.version.l4_use_pseudo_header?
+    if packet.version.l4_use_pseudo_header?
+      checksum = IP.checksum_adjust(checksum, 0, packet.pseudo_header.unpack('n*'))
+    end
     packet.encode_u16(packet.l4_start + 2, checksum)
   end
 end
