@@ -154,6 +154,8 @@ class NATTable
 end
 
 class SymmetricNATTable < NATTable
+  ZERO_STR = "\0".b * (16 + 2) * 2
+
   def empty_port(remote_addr, remote_port)
     gc
     20.times do
@@ -167,11 +169,13 @@ class SymmetricNATTable < NATTable
     l3_tuple = packet.tuple
     l3_tuple_size = l3_tuple.size
 
-    b = IO::Buffer.new(l3_tuple_size + 4)
-    b.copy(l3_tuple)
-    b.copy(packet.l4.tuple, l3_tuple_size)
+    key = ZERO_STR.byteslice(0, l3_tuple_size + 4)
+    IO::Buffer.for(key) do |b|
+      b.copy(l3_tuple)
+      b.copy(packet.l4.tuple, l3_tuple_size)
+    end
 
-    b.get_string
+    key
   end
 
   def local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)
@@ -182,11 +186,13 @@ class SymmetricNATTable < NATTable
     src_addr = packet.src_addr
     addr_size = src_addr.size
 
-    b = IO::Buffer.new(addr_size + 4)
-    b.copy(src_addr)
-    b.copy(packet.l4.tuple, addr_size)
+    key = ZERO_STR.byteslice(0, addr_size + 4)
+    IO::Buffer.for(key) do |b|
+      b.copy(src_addr)
+      b.copy(packet.l4.tuple, addr_size)
+    end
 
-    b.get_string
+    key
   end
 
   def remote_key_from_tuple(global_port, remote_addr, remote_port)
@@ -195,6 +201,8 @@ class SymmetricNATTable < NATTable
 end
 
 class ConeNATTable < NATTable
+  ZERO_STR = "\0".b * (16 + 2)
+
   def empty_port(_remote_addr, _remote_port)
     gc
     @empty_ports = global_ports.dup if @empty_ports.nil?
@@ -212,11 +220,13 @@ class ConeNATTable < NATTable
     src_addr = packet.src_addr
     addr_size = src_addr.size
 
-    b = IO::Buffer.new(addr_size + 2)
-    b.copy(src_addr)
-    b.set_value(:U16, addr_size, packet.l4.src_port)
+    key = ZERO_STR.byteslice(0, addr_size + 2)
+    IO::Buffer.for(key) do |b|
+      b.copy(src_addr)
+      b.set_value(:U16, addr_size, packet.l4.src_port)
+    end
 
-    b.get_string
+    key
   end
 
   def local_key_from_tuple(local_addr, local_port, _remote_addr, _remote_port)
