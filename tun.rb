@@ -302,7 +302,7 @@ class TCPUDP
   end
 
   def tuple
-    @packet.bytes.slice(@packet.l4_start, 4).dup
+    @packet.bytes.slice(@packet.l4_start, 4)
   end
 
   def _apply(checksum_offset)
