@@ -38,8 +38,8 @@ end
 
 $nat = Nat.new
 
-# global address is 192.168.0.137
-$nat.global_addr = IO::Buffer.for("\xc0\xa8\x0\x89".b)
+# global address is 192.168.0.139
+$nat.global_addr = IO::Buffer.for("\xc0\xa8\x0\x8b".b)
 
 # create TCP, UDP, ICMP Echo tables
 $nat.tcp_table = SymmetricNATTable.new('tcp')

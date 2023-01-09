@@ -3,8 +3,6 @@
 require 'socket'
 
 class IP
-  ZERO_SIZED_BUFFER = IO::Buffer.new(0)
-
   class V4
     def self.addr_size
       4
@@ -148,8 +146,8 @@ class IP
     end
   end
 
-  attr_accessor :bytes, :proto, :l4_start, :l4, :pseudo_header, :orig_pseudo_header
-  attr_reader :version
+  attr_accessor :bytes, :proto, :l4_start, :l4, :pseudo_header
+  attr_reader :version, :orig_pseudo_header_checksum
 
   def initialize(bytes)
     @bytes = bytes
@@ -172,7 +170,7 @@ class IP
 
     return nil unless @version.parse(self)
 
-    @orig_pseudo_header = @pseudo_header.dup
+    @orig_pseudo_header_checksum = IP.sum16(@pseudo_header)
 
     case @proto
     when UDP::PROTOCOL_ID
@@ -228,45 +226,39 @@ class IP
     l4.apply
   end
 
-  def self.checksum(bytes, from = nil, len = nil)
+  def self.sum16(bytes, from = nil, len = nil)
     from = 0 if from.nil?
     len = bytes.size - from if len.nil?
 
     sum = 0
     to = from + len / 2 * 2
+
     while from < to
       sum += bytes.get_value(:U16, from)
       from += 2
     end
     sum += bytes.get_value(:U8, from) * 256 if len.odd?
 
+    sum
+  end
+
+  def self.checksum(bytes, from = nil, len = nil)
+    sum = IP.sum16(bytes, from, len)
     while sum > 65535
       sum = (sum & 0xffff) + (sum >> 16)
     end
-
     ~sum & 0xffff
   end
 
   # fom RFC 3022 4.2
-  def self.checksum_adjust(sum, old_bytes, new_bytes)
+  def self.checksum_adjust(sum, old_cs, new_cs)
     sum = ~sum & 0xffff
 
-    off = 0
-    len = old_bytes.size
-    while off < len
-      sum -= old_bytes.get_value(:U16, off)
-      off += 2
-    end
+    sum -= old_cs
     while sum < 0
       sum = (sum & 0xffff) + (sum >> 16)
     end
-
-    off = 0
-    len = new_bytes.size
-    while off < len
-      sum += new_bytes.get_value(:U16, off)
-      off += 2
-    end
+    sum += new_cs
     while sum > 65535
       sum = (sum & 0xffff) + (sum >> 16)
     end
@@ -287,24 +279,25 @@ class IP
 end
 
 class TCPUDP
-  def initialize(packet)
-    @packet = packet
-    @orig_tuple = packet.bytes.slice(packet.l4_start, 4).dup
-  end
+  attr_reader :src_port, :dest_port
 
-  def src_port
-    @packet.bytes.get_value(:U16, @packet.l4_start)
+  def initialize(packet)
+    bytes = packet.bytes
+    l4_start = packet.l4_start
+
+    @packet = packet
+    @src_port = bytes.get_value(:U16, l4_start)
+    @dest_port = bytes.get_value(:U16, l4_start + 2)
+    @orig_checksum = @src_port + @dest_port
   end
 
   def src_port=(n)
+    @src_port = n
     @packet.bytes.set_value(:U16, @packet.l4_start, n)
   end
 
-  def dest_port
-    @packet.bytes.get_value(:U16, @packet.l4_start + 2)
-  end
-
   def dest_port=(n)
+    @dest_port = n
     @packet.bytes.set_value(:U16, @packet.l4_start + 2, n)
   end
 
@@ -317,11 +310,13 @@ class TCPUDP
     bytes = packet.bytes
     l4_start = packet.l4_start
 
+    orig_checksum = packet.orig_pseudo_header_checksum + @orig_checksum
+    new_checksum = IP.sum16(packet.pseudo_header) + @src_port + @dest_port
+
     return unless bytes.size >= l4_start + checksum_offset + 2
 
     checksum = bytes.get_value(:U16, l4_start + checksum_offset)
-    checksum = IP.checksum_adjust(checksum, packet.orig_pseudo_header, packet.pseudo_header)
-    checksum = IP.checksum_adjust(checksum, @orig_tuple, bytes.slice(l4_start, 4))
+    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
     bytes.set_value(:U16, l4_start + checksum_offset, checksum)
   end
 end
@@ -442,15 +437,14 @@ class TCP < TCPUDP
     l7_start = _calc_l7_start
     return false unless l7_start
 
-    checksum = bytes.get_value(:U16, l4_start + CHECKSUM_OFFSET)
-
     # rewrite Option
-    IP.checksum_adjust(checksum, bytes.slice(off, len), replace)
+    orig_checksum = IP.sum16(bytes, off, len)
+    new_checksum = IP.sum16(replace)
     if len != replace.size
       bytes.resize(replace.size - len)
       bytes.copy(bytes, off + replace.size, bytes.size - (off + replace.size), off + len)
     end
-    bytes.copy(replace, off, replace.len)
+    bytes.copy(replace, off, replace.size)
 
     # make necessary adjustments if TCP header size and hence the packet size have changed
     if len != replace.size
@@ -458,12 +452,15 @@ class TCP < TCPUDP
       new_data_offset = (l7_start - l4_start) + (replace.length - len)
       raise 'have to adjust padding but that is not implemented yet' if new_data_offset % 4 != 0
 
-      orig_twobytes = bytes.slice(l4_start + DATA_OFFSET_OFFSET, 2).dup
-      bytes.set_value(:U8, l4_start + DATA_OFFSET_OFFSET,
-                    (new_data_offset / 4) << 4 | (bytes.get_value(:U8, l4_start + DATA_OFFSET_OFFSET) & 0xf))
-      IP.checksum_adjust(checksum, orig_twobytes, bytes.slice(l4_start + DATA_OFFSET_OFFSET, 2))
+      orig16 = bytes.get_value(:U16, l4_start + DATA_OFFSET_OFFSET)
+      new16 = (new_data_offset / 4) << 12 | (orig16 & 0x0fff)
+      bytes.set_value(:U16, l4_start + DATA_OFFSET_OFFSET, new16)
+      orig_checksum += orig16
+      new_checksum += new16
     end
 
+    checksum = bytes.get_value(:U16, l4_start + CHECKSUM_OFFSET)
+    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
     bytes.set_value(:U16, l4_start + CHECKSUM_OFFSET, checksum)
 
     true
@@ -522,7 +519,9 @@ class ICMP
 
     bytes.set_value(:U16, l4_start + 2, 0)
     checksum = IP.checksum(bytes, l4_start)
-    checksum = IP.checksum_adjust(checksum, ZERO_SIZED_BUFFER, packet.pseudo_header) if packet.version.l4_use_pseudo_header?
+    if packet.version.l4_use_pseudo_header?
+      checksum = IP.checksum_adjust(checksum, 0, IP.sum16(packet.pseudo_header))
+    end
     bytes.set_value(:U16, l4_start + 2, checksum)
   end
 end
