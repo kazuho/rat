@@ -26,13 +26,12 @@ class IP
     end
 
     def self.l4_length(pseudo_header)
-      pseudo_header[10..11].unpack1('n')
+      pseudo_header.get16be(10)
     end
 
     def self.set_l4_length(pseudo_header, packet_bytes, len)
-      len = [len].pack('n')
-      pseudo_header[10..11] = len
-      packet_bytes[2..3] = len
+      pseudo_header.set16be(10, len)
+      packet_bytes.set16be(2, len)
     end
 
     def self.icmp_protocol_id
@@ -101,13 +100,12 @@ class IP
     end
 
     def self.l4_length(pseudo_header)
-      pseudo_header[34..35].unpack1('n')
+      pseudo_header.get16be(34)
     end
 
     def self.set_l4_length(pseudo_header, packet_bytes, len)
-      len = [len].pack('n')
-      pseudo_header[34..35] = len
-      packet_bytes[4..5] = len
+      pseudo_header.set16be(34, len)
+      packet_bytes.set16be(4, len)
     end
 
     def self.icmp_protocol_id
