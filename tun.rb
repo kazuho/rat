@@ -251,25 +251,22 @@ class IP
 
     sum = bytes[from..to].unpack('n*').sum
     sum += bytes.getbyte(to) * 256 if len.odd?
-    ~((sum >> 16) + sum) & 0xffff
+    while sum > 65535
+      sum = (sum & 0xffff) + (sum >> 16)
+    end
+    ~sum & 0xffff
   end
 
   # fom RFC 3022 4.2
   def self.checksum_adjust(sum, old_bytes, new_bytes)
     sum = ~sum & 0xffff
-    old_bytes.unpack('n*').each do |u16|
-      sum -= u16
-      if sum <= 0
-        sum -= 1
-        sum &= 0xffff
-      end
+    sum -= old_bytes.unpack('n*').sum
+    while sum < 0
+      sum = (sum & 0xffff) + (sum >> 16)
     end
-    new_bytes.unpack('n*').each do |u16|
-      sum += u16
-      if sum >= 0x10000
-        sum += 1
-        sum &= 0xffff
-      end
+    sum += new_bytes.unpack('n*').sum
+    while sum > 65535
+      sum = (sum & 0xffff) + (sum >> 16)
     end
     ~sum & 0xffff
   end
