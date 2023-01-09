@@ -240,7 +240,11 @@ class IP
     end
     sum += bytes.get_value(:U8, from) * 256 if len.odd?
 
-    ~((sum >> 16) + sum) & 0xffff
+    while sum > 65535
+      sum = (sum & 0xffff) + (sum >> 16)
+    end
+
+    ~sum & 0xffff
   end
 
   # fom RFC 3022 4.2
@@ -251,22 +255,20 @@ class IP
     len = old_bytes.size
     while off < len
       sum -= old_bytes.get_value(:U16, off)
-      if sum <= 0
-        sum -= 1
-        sum &= 0xffff
-      end
       off += 2
+    end
+    while sum < 0
+      sum = (sum & 0xffff) + (sum >> 16)
     end
 
     off = 0
     len = new_bytes.size
     while off < len
       sum += new_bytes.get_value(:U16, off)
-      if sum >= 0x10000
-        sum += 1
-        sum &= 0xffff
-      end
       off += 2
+    end
+    while sum > 65535
+      sum = (sum & 0xffff) + (sum >> 16)
     end
 
     ~sum & 0xffff
