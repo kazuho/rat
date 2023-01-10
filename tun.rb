@@ -255,14 +255,10 @@ class IP
   end
 
   # fom RFC 3022 4.2
-  def self.checksum_adjust(sum, old_cs, new_cs)
+  def self.checksum_adjust(sum, delta)
     sum = ~sum & 0xffff
-    sum -= old_cs
-    while sum < 0
-      sum = (sum & 0xffff) + (sum >> 16)
-    end
-    sum += new_cs
-    while sum > 65535
+    sum += delta
+    while sum < 0 || 65535 < sum
       sum = (sum & 0xffff) + (sum >> 16)
     end
     ~sum & 0xffff
@@ -312,13 +308,11 @@ class TCPUDP
     bytes = packet.bytes
     l4_start = packet.l4_start
 
-    orig_checksum = packet.orig_pseudo_header_checksum + @orig_checksum
-    new_checksum = packet.pseudo_header.unpack("n*").sum + @src_port + @dest_port
-
     return unless bytes.length >= l4_start + checksum_offset + 2
 
+    cs_delta = packet.pseudo_header.unpack("n*").sum - packet.orig_pseudo_header_checksum + @src_port + @dest_port - @orig_checksum
     checksum = bytes.get16be(l4_start + checksum_offset)
-    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
+    checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set16be(l4_start + checksum_offset, checksum)
   end
 end
@@ -441,9 +435,8 @@ class TCP < TCPUDP
                 ''
               end
 
-    # rewrite Option, retaining the bytes for checksum calculation
-    orig_checksum = bytes.byteslice(off, len).unpack('n*').sum
-    new_checksum = replace.unpack('n*').sum
+    # rewrite Option, retaining checksum delta
+    cs_delta = replace.unpack('n*').sum - bytes.byteslice(off, len).unpack('n*').sum
     bytes.bytesplice(off, len, replace)
 
     # make necessary adjustments if TCP header size and hence the packet size have changed
@@ -452,14 +445,14 @@ class TCP < TCPUDP
       new_data_offset = (l7_start - l4_start) + (replace.length - len)
       raise 'have to adjust padding but that is not implemented yet' if new_data_offset % 4 != 0
 
-      orig_checksum += bytes.get16be(l4_start + DATA_OFFSET_OFFSET)
+      cs_delta -= bytes.get16be(l4_start + DATA_OFFSET_OFFSET)
       bytes.setbyte(l4_start + DATA_OFFSET_OFFSET,
                     (new_data_offset / 4) << 4 | (bytes.getbyte(l4_start + DATA_OFFSET_OFFSET) & 0xf))
-      new_checksum += bytes.get16be(l4_start + DATA_OFFSET_OFFSET)
+      cs_delta += bytes.get16be(l4_start + DATA_OFFSET_OFFSET)
     end
 
     checksum = bytes.byteslice(l4_start + CHECKSUM_OFFSET, 2).unpack1('n')
-    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
+    checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set16be(l4_start + CHECKSUM_OFFSET, checksum)
 
     true
@@ -516,7 +509,7 @@ class ICMP
     packet.bytes.set16be(packet.l4_start + 2, 0)
     checksum = IP.checksum(packet.bytes, packet.l4_start)
     if packet.version.l4_use_pseudo_header?
-      checksum = IP.checksum_adjust(checksum, 0, packet.pseudo_header.unpack('n*'))
+      checksum = IP.checksum_adjust(checksum, packet.pseudo_header.unpack('n*'))
     end
     packet.bytes.set16be(packet.l4_start + 2, checksum)
   end
