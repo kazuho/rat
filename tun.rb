@@ -184,7 +184,7 @@ class IP
     self
   end
 
-  def self.parse(bytes, icmp_payload = false)
+  def self.parse(bytes, icmp_payload: false)
     IP.new(bytes)._parse(icmp_payload)
   end
 
@@ -244,25 +244,15 @@ class IP
 
   def self.checksum(bytes, from = nil, len = nil)
     sum = IP.sum16(bytes, from, len)
-    while sum > 65535
-      sum = (sum & 0xffff) + (sum >> 16)
-    end
+    sum = (sum & 0xffff) + (sum >> 16) while sum > 65535
     ~sum & 0xffff
   end
 
   # fom RFC 3022 4.2
-  def self.checksum_adjust(sum, old_cs, new_cs)
+  def self.checksum_adjust(sum, delta)
     sum = ~sum & 0xffff
-
-    sum -= old_cs
-    while sum < 0
-      sum = (sum & 0xffff) + (sum >> 16)
-    end
-    sum += new_cs
-    while sum > 65535
-      sum = (sum & 0xffff) + (sum >> 16)
-    end
-
+    sum += delta
+    sum = (sum & 0xffff) + (sum >> 16) while sum < 0 || sum > 65535
     ~sum & 0xffff
   end
 
@@ -310,13 +300,13 @@ class TCPUDP
     bytes = packet.bytes
     l4_start = packet.l4_start
 
-    orig_checksum = packet.orig_pseudo_header_checksum + @orig_checksum
-    new_checksum = IP.sum16(packet.pseudo_header) + @src_port + @dest_port
-
     return unless bytes.size >= l4_start + checksum_offset + 2
 
+    cs_delta = IP.sum16(packet.pseudo_header) - packet.orig_pseudo_header_checksum +
+               @src_port + @dest_port - @orig_checksum
+
     checksum = bytes.get_value(:U16, l4_start + checksum_offset)
-    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
+    checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set_value(:U16, l4_start + checksum_offset, checksum)
   end
 end
@@ -437,9 +427,8 @@ class TCP < TCPUDP
     l7_start = _calc_l7_start
     return false unless l7_start
 
-    # rewrite Option
-    orig_checksum = IP.sum16(bytes, off, len)
-    new_checksum = IP.sum16(replace)
+    # rewrite Option, retaining checksum delta
+    cs_delta = IP.sum16(replace) - IP.sum16(bytes, off, len)
     if len != replace.size
       bytes.resize(replace.size - len)
       bytes.copy(bytes, off + replace.size, bytes.size - (off + replace.size), off + len)
@@ -455,12 +444,11 @@ class TCP < TCPUDP
       orig16 = bytes.get_value(:U16, l4_start + DATA_OFFSET_OFFSET)
       new16 = (new_data_offset / 4) << 12 | (orig16 & 0x0fff)
       bytes.set_value(:U16, l4_start + DATA_OFFSET_OFFSET, new16)
-      orig_checksum += orig16
-      new_checksum += new16
+      cs_delta += new_16 - orig16
     end
 
     checksum = bytes.get_value(:U16, l4_start + CHECKSUM_OFFSET)
-    checksum = IP.checksum_adjust(checksum, orig_checksum, new_checksum)
+    checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set_value(:U16, l4_start + CHECKSUM_OFFSET, checksum)
 
     true
@@ -519,9 +507,7 @@ class ICMP
 
     bytes.set_value(:U16, l4_start + 2, 0)
     checksum = IP.checksum(bytes, l4_start)
-    if packet.version.l4_use_pseudo_header?
-      checksum = IP.checksum_adjust(checksum, 0, IP.sum16(packet.pseudo_header))
-    end
+    checksum = IP.checksum_adjust(checksum, IP.sum16(packet.pseudo_header)) if packet.version.l4_use_pseudo_header?
     bytes.set_value(:U16, l4_start + 2, checksum)
   end
 end
