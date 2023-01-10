@@ -14,7 +14,6 @@ class String
   end
 end
 
-
 class IP
   ZERO_BYTES2 = "\0\0".b
   ZERO_BYTES4 = "\0\0\0\0".b
@@ -199,7 +198,7 @@ class IP
     self
   end
 
-  def self.parse(bytes, icmp_payload = false)
+  def self.parse(bytes, icmp_payload: false)
     IP.new(bytes)._parse(icmp_payload)
   end
 
@@ -248,9 +247,7 @@ class IP
 
     sum = bytes[from..to].unpack('n*').sum
     sum += bytes.getbyte(to) * 256 if len.odd?
-    while sum > 65535
-      sum = (sum & 0xffff) + (sum >> 16)
-    end
+    sum = (sum & 0xffff) + (sum >> 16) while sum > 65535
     ~sum & 0xffff
   end
 
@@ -258,9 +255,7 @@ class IP
   def self.checksum_adjust(sum, delta)
     sum = ~sum & 0xffff
     sum += delta
-    while sum < 0 || 65535 < sum
-      sum = (sum & 0xffff) + (sum >> 16)
-    end
+    sum = (sum & 0xffff) + (sum >> 16) while sum < 0 || sum > 65535
     ~sum & 0xffff
   end
 
@@ -310,7 +305,8 @@ class TCPUDP
 
     return unless bytes.length >= l4_start + checksum_offset + 2
 
-    cs_delta = packet.pseudo_header.unpack("n*").sum - packet.orig_pseudo_header_checksum + @src_port + @dest_port - @orig_checksum
+    cs_delta = packet.pseudo_header.unpack('n*').sum - packet.orig_pseudo_header_checksum +
+               @src_port + @dest_port - @orig_checksum
     checksum = bytes.get16be(l4_start + checksum_offset)
     checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set16be(l4_start + checksum_offset, checksum)
@@ -508,9 +504,7 @@ class ICMP
   def self.recalculate_checksum(packet)
     packet.bytes.set16be(packet.l4_start + 2, 0)
     checksum = IP.checksum(packet.bytes, packet.l4_start)
-    if packet.version.l4_use_pseudo_header?
-      checksum = IP.checksum_adjust(checksum, packet.pseudo_header.unpack('n*'))
-    end
+    checksum = IP.checksum_adjust(checksum, packet.pseudo_header.unpack('n*')) if packet.version.l4_use_pseudo_header?
     packet.bytes.set16be(packet.l4_start + 2, checksum)
   end
 end
