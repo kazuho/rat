@@ -189,7 +189,7 @@ class IP
 
   def initialize(bytes)
     @bytes = bytes
-    @l7_cs_delta = 0
+    @l4_cs_delta = 0
   end
 
   def _parse(icmp_payload)
@@ -230,7 +230,7 @@ class IP
   end
 
   def src_addr=(new_addr)
-    @l7_cs_delta += @version.set_src_addr(@bytes, new_addr)
+    @l4_cs_delta += @version.set_src_addr(@bytes, new_addr)
   end
 
   def dest_addr
@@ -238,7 +238,7 @@ class IP
   end
 
   def dest_addr=(new_addr)
-    @l7_cs_delta += @version.set_dest_addr(@bytes, new_addr)
+    @l4_cs_delta += @version.set_dest_addr(@bytes, new_addr)
   end
 
   def tuple
@@ -246,12 +246,12 @@ class IP
   end
 
   def update_l4_length
-    @l7_cs_delta += @version.update_l4_length(@bytes)
+    @l4_cs_delta += @version.update_l4_length(@bytes)
   end
 
   def apply
     @version.apply(self)
-    l4.apply(@l7_cs_delta)
+    l4.apply(@l4_cs_delta)
   end
 
   def self.checksum(bytes, from = nil, len = nil)
