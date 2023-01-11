@@ -240,7 +240,7 @@ class IP
     l4.apply(@l4_cs_delta)
   end
 
-  def self.sum16(bytes, from = nil, len = nil)
+  def self.sum16(bytes, from, len)
     sum = 0
     to = from + len
 
