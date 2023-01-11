@@ -121,6 +121,7 @@ class IP
     def self.set_dest_addr(bytes, new_addr)
       cs_delta = new_addr.unpack('n*').sum - bytes.unpack('@24n8').sum
       bytes.bytesplice(24, 16, new_addr)
+      cs_delta
     end
 
     def self.tuple(bytes)
@@ -205,7 +206,7 @@ class IP
       return nil
     end
 
-    @tuple_checksum = @version.parse(self)
+    return nil unless @version.parse(self)
 
     case @proto
     when UDP::PROTOCOL_ID
