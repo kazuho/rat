@@ -16,12 +16,30 @@ end
 
 class IP
   ZERO_BYTES2 = "\0\0".b
-  ZERO_BYTES4 = "\0\0\0\0".b
-  ZERO_BYTES8 = "\0\0\0\0\0\0\0\0".b
 
   class V4
-    def self.addr_size
-      4
+    def self.src_addr(bytes)
+      bytes.byteslice(12, 4)
+    end
+
+    def self.set_src_addr(bytes, new_addr)
+      cs_delta = new_addr.unpack('n*').sum - bytes.unpack('@12n2').sum
+      bytes.bytesplice(12, 4, new_addr)
+      cs_delta
+    end
+
+    def self.dest_addr(bytes)
+      bytes.byteslice(16, 4)
+    end
+
+    def self.set_dest_addr(bytes, new_addr)
+      cs_delta = new_addr.unpack('n*').sum - bytes.unpack('@16n2').sum
+      bytes.bytesplice(16, 4, new_addr)
+      cs_delta
+    end
+
+    def self.tuple(bytes)
+      bytes.byteslice(12, 8)
     end
 
     def self.l4_length(pseudo_header)
@@ -37,8 +55,8 @@ class IP
       ICMP::V4_PROTOCOL_ID
     end
 
-    def self.l4_use_pseudo_header?
-      false
+    def self.icmp_cs_delta(packet)
+      0
     end
 
     def self.new_icmp(packet, type)
@@ -68,12 +86,6 @@ class IP
       proto = bytes.getbyte(9)
       packet.proto = proto
 
-      # build pseudo header
-      pseudo_header = bytes[12..19] + IP::ZERO_BYTES4
-      pseudo_header.setbyte(9, proto)
-      pseudo_header.set16be(10, bytes.length - 20)
-      packet.pseudo_header = pseudo_header
-
       true
     end
 
@@ -82,8 +94,6 @@ class IP
 
       # decrement TTL
       bytes.setbyte(8, bytes.getbyte(8) - 1)
-
-      bytes.bytesplice(12, 8, packet.pseudo_header.byteslice(0, 8))
 
       bytes.bytesplice(10, 2, IP::ZERO_BYTES2)
       checksum = IP.checksum(bytes, 0, packet.l4_start)
@@ -94,8 +104,27 @@ class IP
   class V6
     EXTENSIONS = [0, 43, 44, 51, 50, 60, 135, 139, 140, 253, 254].map { |id| [id, true] }.to_h
 
-    def self.addr_size
-      16
+    def self.src_addr(bytes)
+      bytes.byteslice(8, 16)
+    end
+
+    def self.set_src_addr(bytes, new_addr)
+      cs_delta = new_addr.unpack('n*').sum - bytes.unpack('@8n8').sum
+      bytes.bytesplice(8, 16, new_addr)
+      cs_delta
+    end
+
+    def self.get_dest_addr(bytes)
+      bytes.byteslice(24, 16)
+    end
+
+    def self.set_dest_addr(bytes, new_addr)
+      cs_delta = new_addr.unpack('n*').sum - bytes.unpack('@24n8').sum
+      bytes.bytesplice(24, 16, new_addr)
+    end
+
+    def self.tuple(bytes)
+      bytes.byteslice(8, 32)
     end
 
     def self.l4_length(pseudo_header)
@@ -111,8 +140,9 @@ class IP
       ICMP::V6_PROTOCOL_ID
     end
 
-    def self.l4_use_pseudo_header?
-      true
+    def self.icmp_cs_delta(packet)
+      upper_layer_packet_length = packet.bytes.length - packet.l4_start
+      (packet.tuple + upper_layer_packet_length + packet.proto).unpack('n*').sum
     end
 
     def self.new_icmp(packet, type)
@@ -141,12 +171,6 @@ class IP
       packet.proto = proto
       packet.l4_start = 40
 
-      # build pseudo header
-      pseudo_header = bytes[8..39] + IP::ZERO_BYTES8
-      pseudo_header.set16be(34, bytes.length - 40)
-      pseudo_header.setbyte(39, proto)
-      packet.pseudo_header = pseudo_header
-
       true
     end
 
@@ -155,16 +179,15 @@ class IP
 
       # decrement hop limit
       bytes.setbyte(7, bytes.getbyte(7) - 1)
-
-      bytes.bytesplice(8, 32, packet.pseudo_header.byteslice(0, 32))
     end
   end
 
-  attr_accessor :bytes, :proto, :l4_start, :l4, :pseudo_header
-  attr_reader :version, :orig_pseudo_header_checksum
+  attr_accessor :bytes, :proto, :l4_start, :l4
+  attr_reader :version
 
   def initialize(bytes)
     @bytes = bytes
+    @l7_cs_delta = 0
   end
 
   def _parse(icmp_payload)
@@ -182,9 +205,7 @@ class IP
       return nil
     end
 
-    return nil unless @version.parse(self)
-
-    @orig_pseudo_header_checksum = @pseudo_header.unpack('n*').sum
+    @tuple_checksum = @version.parse(self)
 
     case @proto
     when UDP::PROTOCOL_ID
@@ -203,41 +224,38 @@ class IP
   end
 
   def src_addr
-    addr_size = @version.addr_size
-    @pseudo_header.byteslice(0, addr_size)
+    @version.src_addr(@bytes)
   end
 
-  def src_addr=(x)
-    addr_size = @version.addr_size
-    @pseudo_header.bytesplice(0, addr_size, x)
+  def src_addr=(new_addr)
+    @l7_cs_delta += @version.set_src_addr(@bytes, new_addr)
   end
 
   def dest_addr
-    addr_size = @version.addr_size
-    @pseudo_header.byteslice(addr_size, addr_size)
+    @version.dest_addr(@bytes)
   end
 
-  def dest_addr=(x)
-    addr_size = @version.addr_size
-    @pseudo_header.bytesplice(addr_size, addr_size, x)
+  def dest_addr=(new_addr)
+    @l7_cs_delta += @version.set_dest_addr(@bytes, new_addr)
   end
 
   def tuple
-    addr_size = @version.addr_size
-    @pseudo_header.byteslice(0, addr_size * 2)
+    @version.tuple(@bytes)
   end
 
   def l4_length
-    @version.l4_length(@pseudo_header)
+    @bytes.length - l4_start
   end
 
-  def l4_length=(x)
-    @version.set_l4_length(@pseudo_header, @bytes, x)
+  def l4_length=(new_length)
+    orig_length = @bytes.length - l4_start
+    @version.set_l4_length(@bytes, new_length)
+    @l7_cs_delta += new_length - orig_length
   end
 
   def apply
     @version.apply(self)
-    l4.apply
+    l4.apply(@l7_cs_delta)
   end
 
   def self.checksum(bytes, from = nil, len = nil)
@@ -298,15 +316,14 @@ class TCPUDP
     @packet.bytes.byteslice(@packet.l4_start, 4)
   end
 
-  def _apply(checksum_offset)
+  def _apply(checksum_offset, cs_delta)
     packet = @packet
     bytes = packet.bytes
     l4_start = packet.l4_start
 
     return unless bytes.length >= l4_start + checksum_offset + 2
 
-    cs_delta = packet.pseudo_header.unpack('n*').sum - packet.orig_pseudo_header_checksum +
-               @src_port + @dest_port - @orig_checksum
+    cs_delta += @src_port + @dest_port - @orig_checksum
     checksum = bytes.get16be(l4_start + checksum_offset)
     checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set16be(l4_start + checksum_offset, checksum)
@@ -323,8 +340,8 @@ class UDP < TCPUDP
     UDP.new(packet)
   end
 
-  def apply
-    _apply(CHECKSUM_OFFSET)
+  def apply(cs_delta)
+    _apply(CHECKSUM_OFFSET, cs_delta)
   end
 end
 
@@ -390,8 +407,8 @@ class TCP < TCPUDP
     newval
   end
 
-  def apply
-    _apply(16)
+  def apply(cs_delta)
+    _apply(16, cs_delta)
   end
 
   def each_option
@@ -497,14 +514,14 @@ class ICMP
     icmp._parse
   end
 
-  def apply
+  def apply(cs_delta)
     # ICMP does not use pseudo headers
   end
 
   def self.recalculate_checksum(packet)
     packet.bytes.set16be(packet.l4_start + 2, 0)
     checksum = IP.checksum(packet.bytes, packet.l4_start)
-    checksum = IP.checksum_adjust(checksum, packet.pseudo_header.unpack('n*')) if packet.version.l4_use_pseudo_header?
+    checksum = IP.checksum_adjust(checksum, packet.version.icmp_cs_delta(packet))
     packet.bytes.set16be(packet.l4_start + 2, checksum)
   end
 end
@@ -541,7 +558,7 @@ class ICMPEcho < ICMP
     [src_port, dest_port].pack('n*')
   end
 
-  def apply
+  def apply(cs_delta)
     @packet.bytes.set16be(@packet.l4_start + 4, @is_req ? @src_port : @dest_port)
     ICMP.recalculate_checksum(@packet)
   end
@@ -565,7 +582,7 @@ class ICMPError < ICMP
     self
   end
 
-  def apply
+  def apply(cs_delta)
     @original.apply
 
     # overwrite packet image with orig packet being built
