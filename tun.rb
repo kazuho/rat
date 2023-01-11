@@ -42,13 +42,11 @@ class IP
       bytes.byteslice(12, 8)
     end
 
-    def self.l4_length(pseudo_header)
-      pseudo_header.get16be(10)
-    end
-
-    def self.set_l4_length(pseudo_header, packet_bytes, len)
-      pseudo_header.set16be(10, len)
-      packet_bytes.set16be(2, len)
+    def self.update_l4_length(bytes)
+      orig_length = bytes.get16be(2)
+      new_length = bytes.length
+      bytes.set16be(2, new_length)
+      new_length - orig_length
     end
 
     def self.icmp_protocol_id
@@ -128,8 +126,11 @@ class IP
       bytes.byteslice(8, 32)
     end
 
-    def self.l4_length(pseudo_header)
-      pseudo_header.get16be(34)
+    def self.update_l4_length(bytes)
+      orig_length = bytes.get16be(4)
+      new_length = bytes.length - 40
+      bytes.set16be(4, new_length)
+      new_length - orig_length
     end
 
     def self.set_l4_length(pseudo_header, packet_bytes, len)
@@ -244,14 +245,8 @@ class IP
     @version.tuple(@bytes)
   end
 
-  def l4_length
-    @bytes.length - l4_start
-  end
-
-  def l4_length=(new_length)
-    orig_length = @bytes.length - l4_start
-    @version.set_l4_length(@bytes, new_length)
-    @l7_cs_delta += new_length - orig_length
+  def update_l4_length
+    @l7_cs_delta += @version.update_l4_length(@bytes)
   end
 
   def apply
@@ -455,7 +450,7 @@ class TCP < TCPUDP
 
     # make necessary adjustments if TCP header size and hence the packet size have changed
     if len != replace.length
-      @packet.l4_length += replace.length - len
+      @packet.update_l4_length
       new_data_offset = (l7_start - l4_start) + (replace.length - len)
       raise 'have to adjust padding but that is not implemented yet' if new_data_offset % 4 != 0
 
