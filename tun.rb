@@ -130,7 +130,7 @@ class IP
 
     def self.icmp_cs_delta(packet)
       upper_layer_packet_length = packet.bytes.length - packet.l4_start
-      (packet.tuple + upper_layer_packet_length + packet.proto).unpack('n*').sum
+      packet.tuple.unpack('n*').sum + upper_layer_packet_length + packet.proto
     end
 
     def self.new_icmp(packet, type)
