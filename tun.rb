@@ -4,25 +4,43 @@ require 'socket'
 
 class IP
   class V4
-    def self.addr_size
-      4
+    def self.src_addr(bytes)
+      bytes.slice(12, 4)
     end
 
-    def self.l4_length(pseudo_header)
-      pseudo_header.get_value(:U16, 10)
+    def self.set_src_addr(bytes, new_addr)
+      cs_delta = IP.sum16(new_addr, 0, 4) - IP.sum16(bytes, 12, 4)
+      bytes.copy(new_addr, 12)
+      cs_delta
     end
 
-    def self.set_l4_length(pseudo_header, packet_bytes, len)
-      pseudo_header.set_value(:U16, 10, len)
-      packet_bytes.set_value(:U16, 2, len)
+    def self.dest_addr(bytes)
+      bytes.slice(16, 4)
+    end
+
+    def self.set_dest_addr(bytes, new_addr)
+      cs_delta = IP.sum16(new_addr, 0, 4) - IP.sum16(bytes, 16, 4)
+      bytes.copy(new_addr, 16)
+      cs_delta
+    end
+
+    def self.tuple(bytes)
+      bytes.slice(12, 8)
+    end
+
+    def self.update_l4_length(bytes)
+      orig_length = bytes.get_value(:U16, 2)
+      new_length = bytes.size
+      bytes.set_value(:U16, 2, new_length)
+      new_length - orig_length
     end
 
     def self.icmp_protocol_id
       ICMP::V4_PROTOCOL_ID
     end
 
-    def self.l4_use_pseudo_header?
-      false
+    def self.icmp_cs_delta(packet)
+      0
     end
 
     def self.new_icmp(packet, type)
@@ -52,13 +70,6 @@ class IP
       proto = bytes.get_value(:U8, 9)
       packet.proto = proto
 
-      # build pseudo header
-      pseudo_header = IO::Buffer.new(12)
-      pseudo_header.copy(bytes, 0, 8, 12)
-      pseudo_header.set_value(:U8, 9, proto)
-      pseudo_header.set_value(:U16, 10, bytes.size - 20)
-      packet.pseudo_header = pseudo_header
-
       true
     end
 
@@ -67,8 +78,6 @@ class IP
 
       # decrement TTL
       bytes.set_value(:U8, 8, bytes.get_value(:U8, 8) - 1)
-
-      bytes.copy(packet.pseudo_header, 12, 8)
 
       bytes.set_value(:U16, 10, 0)
       checksum = IP.checksum(bytes, 0, packet.l4_start)
@@ -79,12 +88,35 @@ class IP
   class V6
     EXTENSIONS = [0, 43, 44, 51, 50, 60, 135, 139, 140, 253, 254].map { |id| [id, true] }.to_h
 
-    def self.addr_size
-      16
+    def self.src_addr(bytes)
+      bytes.slice(8, 16)
     end
 
-    def self.l4_length(pseudo_header)
-      pseudo_header.get_value(:U16, 34)
+    def self.set_src_addr(bytes, new_addr)
+      cs_delta = IP.sum16(new_addr, 0, 16) - IP.sum16(bytes, 8, 16)
+      bytes.copy(new_addr, 8)
+      cs_delta
+    end
+
+    def self.get_dest_addr(bytes)
+      bytes.slice(24, 16)
+    end
+
+    def self.set_dest_addr(bytes, new_addr)
+      cs_delta = IP.sum16(new_addr, 0, 16) - IP.sum16(bytes, 24, 16)
+      bytes.copy(new_addr, 24)
+      cs_delta
+    end
+
+    def self.tuple(bytes)
+      bytes.slice(8, 32)
+    end
+
+    def self.update_l4_length(bytes)
+      orig_length = bytes.get_value(:U16, 4)
+      new_length = bytes.size - 40
+      bytes.set_value(:U16, 4, new_length)
+      new_length - orig_length
     end
 
     def self.set_l4_length(pseudo_header, packet_bytes, len)
@@ -96,8 +128,9 @@ class IP
       ICMP::V6_PROTOCOL_ID
     end
 
-    def self.l4_use_pseudo_header?
-      true
+    def self.icmp_cs_delta(packet)
+      upper_layer_packet_length = packet.bytes.length - packet.l4_start
+      (packet.tuple + upper_layer_packet_length + packet.proto).unpack('n*').sum
     end
 
     def self.new_icmp(packet, type)
@@ -126,13 +159,6 @@ class IP
       packet.proto = proto
       packet.l4_start = 40
 
-      # build pseudo header
-      pseudo_header = IO::Buffer.new(40)
-      pseudo_header.copy(bytes, 0, 32, 8)
-      pseudo_header.set_value(:U32, 32, bytes.size - 40)
-      pseudo_header.set_value(:U8, 39, proto)
-      packet.pseudo_header = pseudo_header
-
       true
     end
 
@@ -141,16 +167,15 @@ class IP
 
       # decrement hop limit
       bytes.set_value(:U8, 7, bytes.get_value(:U8, 7) - 1)
-
-      bytes.copy(packet.pseudo_header, 8, 32)
     end
   end
 
-  attr_accessor :bytes, :proto, :l4_start, :l4, :pseudo_header
-  attr_reader :version, :orig_pseudo_header_checksum
+  attr_accessor :bytes, :proto, :l4_start, :l4
+  attr_reader :version
 
   def initialize(bytes)
     @bytes = bytes
+    @l7_cs_delta = 0
   end
 
   def _parse(icmp_payload)
@@ -170,8 +195,6 @@ class IP
 
     return nil unless @version.parse(self)
 
-    @orig_pseudo_header_checksum = IP.sum16(@pseudo_header)
-
     case @proto
     when UDP::PROTOCOL_ID
       self.l4 = UDP.parse(self, icmp_payload)
@@ -189,41 +212,32 @@ class IP
   end
 
   def src_addr
-    addr_size = @version.addr_size
-    @pseudo_header.slice(0, addr_size)
+    @version.src_addr(@bytes)
   end
 
-  def src_addr=(x)
-    addr_size = @version.addr_size
-    @pseudo_header.copy(x, 0)
+  def src_addr=(new_addr)
+    @l7_cs_delta += @version.set_src_addr(@bytes, new_addr)
   end
 
   def dest_addr
-    addr_size = @version.addr_size
-    @pseudo_header.slice(addr_size, addr_size)
+    @version.dest_addr(@bytes)
   end
 
-  def dest_addr=(x)
-    addr_size = @version.addr_size
-    @pseudo_header.copy(x, addr_size)
+  def dest_addr=(new_addr)
+    @l7_cs_delta += @version.set_dest_addr(@bytes, new_addr)
   end
 
   def tuple
-    addr_size = @version.addr_size
-    @pseudo_header.slice(0, addr_size * 2)
+    @version.tuple(@bytes)
   end
 
-  def l4_length
-    @version.l4_length(@pseudo_header)
-  end
-
-  def l4_length=(x)
-    @version.set_l4_length(@pseudo_header, @bytes, x)
+  def update_l4_length
+    @l7_cs_delta += @version.update_l4_length(@bytes)
   end
 
   def apply
     @version.apply(self)
-    l4.apply
+    l4.apply(@l7_cs_delta)
   end
 
   def self.sum16(bytes, from = nil, len = nil)
@@ -295,16 +309,14 @@ class TCPUDP
     @packet.bytes.slice(@packet.l4_start, 4)
   end
 
-  def _apply(checksum_offset)
+  def _apply(checksum_offset, cs_delta)
     packet = @packet
     bytes = packet.bytes
     l4_start = packet.l4_start
 
     return unless bytes.size >= l4_start + checksum_offset + 2
 
-    cs_delta = IP.sum16(packet.pseudo_header) - packet.orig_pseudo_header_checksum +
-               @src_port + @dest_port - @orig_checksum
-
+    cs_delta += @src_port + @dest_port - @orig_checksum
     checksum = bytes.get_value(:U16, l4_start + checksum_offset)
     checksum = IP.checksum_adjust(checksum, cs_delta)
     bytes.set_value(:U16, l4_start + checksum_offset, checksum)
@@ -321,8 +333,8 @@ class UDP < TCPUDP
     UDP.new(packet)
   end
 
-  def apply
-    _apply(CHECKSUM_OFFSET)
+  def apply(cs_delta)
+    _apply(CHECKSUM_OFFSET, cs_delta)
   end
 end
 
@@ -392,8 +404,8 @@ class TCP < TCPUDP
     newval
   end
 
-  def apply
-    _apply(16)
+  def apply(cs_delta)
+    _apply(16, cs_delta)
   end
 
   def each_option
@@ -437,7 +449,7 @@ class TCP < TCPUDP
 
     # make necessary adjustments if TCP header size and hence the packet size have changed
     if len != replace.size
-      @packet.l4_length += replace.length - len
+      @packet.update_l4_length
       new_data_offset = (l7_start - l4_start) + (replace.length - len)
       raise 'have to adjust padding but that is not implemented yet' if new_data_offset % 4 != 0
 
@@ -497,18 +509,15 @@ class ICMP
     icmp._parse
   end
 
-  def apply
+  def apply(cs_delta)
     # ICMP does not use pseudo headers
   end
 
   def self.recalculate_checksum(packet)
-    bytes = packet.bytes
-    l4_start = packet.l4_start
-
-    bytes.set_value(:U16, l4_start + 2, 0)
-    checksum = IP.checksum(bytes, l4_start)
-    checksum = IP.checksum_adjust(checksum, IP.sum16(packet.pseudo_header)) if packet.version.l4_use_pseudo_header?
-    bytes.set_value(:U16, l4_start + 2, checksum)
+    packet.bytes.set_value(:U16, packet.l4_start + 2, 0)
+    checksum = IP.checksum(packet.bytes, packet.l4_start)
+    checksum = IP.checksum_adjust(checksum, packet.version.icmp_cs_delta(packet))
+    packet.bytes.set_value(:U16, packet.l4_start + 2, checksum)
   end
 end
 
@@ -550,7 +559,7 @@ class ICMPEcho < ICMP
     @tuple.set_value(:U16, 2, x)
   end
 
-  def apply
+  def apply(cs_delta)
     @packet.bytes.copy(@tuple, @packet.l4_start + 4, 2, @is_req ? 0 : 2)
     ICMP.recalculate_checksum(@packet)
   end
@@ -575,7 +584,7 @@ class ICMPError < ICMP
     self
   end
 
-  def apply
+  def apply(cs_delta)
     @original.apply
 
     # overwrite packet image with orig packet being built
