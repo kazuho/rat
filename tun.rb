@@ -269,7 +269,17 @@ class IP
   def self.checksum_adjust(sum, delta)
     sum = ~sum & 0xffff
     sum += delta
-    sum = (sum & 0xffff) + (sum >> 16) while sum < 0 || sum > 65535
+    if sum > 65535
+      loop do
+        sum = (sum & 0xffff) + (sum >> 16)
+        break unless sum > 65535
+      end
+    elsif sum <= 0
+      loop do
+        sum += 65535 * ((65536 - sum) >> 16)
+        break unless sum <= 0
+        end
+    end
     ~sum & 0xffff
   end
 
