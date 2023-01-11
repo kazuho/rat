@@ -241,23 +241,21 @@ class IP
   end
 
   def self.sum16(bytes, from = nil, len = nil)
-    from = 0 if from.nil?
-    len = bytes.size - from if len.nil?
-
     sum = 0
-    to = from + len / 2 * 2
+    to = from + len
 
     while from < to
       sum += bytes.get_value(:U16, from)
       from += 2
     end
-    sum += bytes.get_value(:U8, from) * 256 if len.odd?
 
     sum
   end
 
-  def self.checksum(bytes, from = nil, len = nil)
-    sum = IP.sum16(bytes, from, len)
+  def self.checksum(bytes, from, len)
+    sum = IP.sum16(bytes, from, len / 2 * 2)
+    sum += bytes.get_value(:U8, from + len - 1) * 256 if len.odd?
+
     sum = (sum & 0xffff) + (sum >> 16) while sum > 65535
     ~sum & 0xffff
   end
@@ -440,7 +438,7 @@ class TCP < TCPUDP
     return false unless l7_start
 
     # rewrite Option, retaining checksum delta
-    cs_delta = IP.sum16(replace) - IP.sum16(bytes, off, len)
+    cs_delta = IP.sum16(replace, 0, len) - IP.sum16(bytes, off, len)
     if len != replace.size
       bytes.resize(replace.size - len)
       bytes.copy(bytes, off + replace.size, bytes.size - (off + replace.size), off + len)
@@ -515,7 +513,7 @@ class ICMP
 
   def self.recalculate_checksum(packet)
     packet.bytes.set_value(:U16, packet.l4_start + 2, 0)
-    checksum = IP.checksum(packet.bytes, packet.l4_start)
+    checksum = IP.checksum(packet.bytes, packet.l4_start, packet.bytes.length - packet.l4_start)
     checksum = IP.checksum_adjust(checksum, packet.version.icmp_cs_delta(packet))
     packet.bytes.set_value(:U16, packet.l4_start + 2, checksum)
   end
