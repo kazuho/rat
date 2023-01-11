@@ -83,9 +83,9 @@ class IP
       # decrement TTL
       bytes.setbyte(8, bytes.getbyte(8) - 1)
 
-      bytes[12..19] = packet.pseudo_header[0..7]
+      bytes.bytesplice(12, 8, packet.pseudo_header.byteslice(0, 8))
 
-      bytes[10..11] = IP::ZERO_BYTES2
+      bytes.bytesplice(10, 2, IP::ZERO_BYTES2)
       checksum = IP.checksum(bytes, 0, packet.l4_start)
       bytes.set16be(10, checksum)
     end
@@ -156,7 +156,7 @@ class IP
       # decrement hop limit
       bytes.setbyte(7, bytes.getbyte(7) - 1)
 
-      bytes[8..39] = packet.pseudo_header[0..31]
+      bytes.bytesplice(8, 32, packet.pseudo_header.byteslice(0, 32))
     end
   end
 
