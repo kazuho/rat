@@ -268,8 +268,9 @@ class IP
   # fom RFC 3022 4.2
   def self.checksum_adjust(sum, delta)
     sum = ~sum & 0xffff
+    delta = (delta & 0xffff) + (delta >> 16) while delta < 0 || delta > 65535
     sum += delta
-    sum = (sum & 0xffff) + (sum >> 16) while sum < 0 || sum > 65535
+    sum += sum >> 16
     ~sum & 0xffff
   end
 
