@@ -260,7 +260,7 @@ class IP
     ~sum & 0xffff
   end
 
-  # fom RFC 3022 4.2
+  # fom RFC 3022 4.2; this function assumes 0 <= sum <= 65534
   def self.checksum_adjust(sum, delta)
     sum = ~sum & 0xffff
     delta = (delta & 0xffff) + (delta >> 16) while delta < 0 || delta > 65535
@@ -308,17 +308,8 @@ class TCPUDP
     @packet.bytes.slice(@packet.l4_start, 4)
   end
 
-  def _apply(checksum_offset, cs_delta)
-    packet = @packet
-    bytes = packet.bytes
-    l4_start = packet.l4_start
-
-    return unless bytes.size >= l4_start + checksum_offset + 2
-
-    cs_delta += @src_port + @dest_port - @orig_checksum
-    checksum = bytes.get_value(:U16, l4_start + checksum_offset)
-    checksum = IP.checksum_adjust(checksum, cs_delta)
-    bytes.set_value(:U16, l4_start + checksum_offset, checksum)
+  def _adjust_checksum(checksum, cs_delta)
+    IP.checksum_adjust(checksum, cs_delta + @src_port + @dest_port - @orig_checksum)
   end
 end
 
@@ -333,7 +324,19 @@ class UDP < TCPUDP
   end
 
   def apply(cs_delta)
-    _apply(CHECKSUM_OFFSET, cs_delta)
+    bytes = @packet.bytes
+    l4_start = @packet.l4_start
+
+    return unless bytes.size >= l4_start + 8
+
+    checksum = bytes.get_value(:U16, l4_start + 6)
+    return if checksum == 0
+
+    checksum = 0 if checksum == 65535
+    checksum = _adjust_checksum(checksum, cs_delta)
+    checksum = 65535 if checksum == 0
+
+    bytes.set_value(:U16, l4_start + 6, checksum)
   end
 end
 
@@ -369,6 +372,17 @@ class TCP < TCPUDP
     TCP.new(packet, flags)
   end
 
+  def apply(cs_delta)
+    bytes = @packet.bytes
+    l4_start = @packet.l4_start
+
+    return unless bytes.size >= l4_start + 18
+
+    checksum = bytes.get_value(:U16, l4_start + 16)
+    checksum = _adjust_checksum(checksum, cs_delta)
+    bytes.set_value(:U16, l4_start + 16, checksum)
+  end
+
   def max_segment_size
     mss = nil
     each_option do |kind, value|
@@ -401,10 +415,6 @@ class TCP < TCPUDP
     end
 
     newval
-  end
-
-  def apply(cs_delta)
-    _apply(16, cs_delta)
   end
 
   def each_option
