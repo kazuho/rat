@@ -73,14 +73,17 @@ class IP
       true
     end
 
-    def self.apply(packet)
-      bytes = packet.bytes
-
+    def self.apply(bytes, cs_delta)
       # decrement TTL
-      bytes.set_value(:U8, 8, bytes.get_value(:U8, 8) - 1)
+      ttl = bytes.get_value(:U8, 8)
+      if ttl > 0
+        ttl -= 1
+        bytes.set_value(:U8, 8, ttl)
+        cs_delta -= 256
+      end
 
-      bytes.set_value(:U16, 10, 0)
-      checksum = IP.checksum(bytes, 0, packet.l4_start)
+      checksum = bytes.get_value(:U16, 10)
+      checksum = IP.checksum_adjust(checksum, cs_delta)
       bytes.set_value(:U16, 10, checksum)
     end
   end
@@ -162,11 +165,13 @@ class IP
       true
     end
 
-    def self.apply(packet)
-      bytes = packet.bytes
-
+    def self.apply(bytes, cs_delta)
       # decrement hop limit
-      bytes.set_value(:U8, 7, bytes.get_value(:U8, 7) - 1)
+      hop_limit = bytes.get_value(:U8, 7)
+      if hop_limit > 0
+        hop_limit -= 1
+        bytes.set_value(:U8, 7, hop_limit)
+      end
     end
   end
 
@@ -175,7 +180,7 @@ class IP
 
   def initialize(bytes)
     @bytes = bytes
-    @l4_cs_delta = 0
+    @cs_delta = 0
   end
 
   def _parse(icmp_payload)
@@ -216,7 +221,7 @@ class IP
   end
 
   def src_addr=(new_addr)
-    @l4_cs_delta += @version.set_src_addr(@bytes, new_addr)
+    @cs_delta += @version.set_src_addr(@bytes, new_addr)
   end
 
   def dest_addr
@@ -224,7 +229,7 @@ class IP
   end
 
   def dest_addr=(new_addr)
-    @l4_cs_delta += @version.set_dest_addr(@bytes, new_addr)
+    @cs_delta += @version.set_dest_addr(@bytes, new_addr)
   end
 
   def tuple
@@ -232,12 +237,13 @@ class IP
   end
 
   def update_l4_length
-    @l4_cs_delta += @version.update_l4_length(@bytes)
+    @cs_delta += @version.update_l4_length(@bytes)
   end
 
   def apply
-    @version.apply(self)
-    l4.apply(@l4_cs_delta)
+    cs_delta = @cs_delta
+    @version.apply(@bytes, cs_delta)
+    l4.apply(cs_delta)
   end
 
   def self.sum16(bytes, from, len)
