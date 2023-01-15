@@ -15,8 +15,6 @@ class String
 end
 
 class IP
-  ZERO_BYTES2 = "\0\0".b
-
   class V4
     def self.src_addr(bytes)
       bytes.byteslice(12, 4)
