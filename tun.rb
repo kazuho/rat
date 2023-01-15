@@ -113,7 +113,7 @@ class IP
       cs_delta
     end
 
-    def self.get_dest_addr(bytes)
+    def self.dest_addr(bytes)
       bytes.byteslice(24, 16)
     end
 
@@ -283,7 +283,7 @@ class IP
     when 4
       addr.unpack('C4').join('.')
     when 16
-      addr.unpack('n8').map { |f| format '%x', f }.join(':').gsub!(/(:0)+(?=:)/, ':')
+      addr.unpack('n8').map { |f| format '%x', f }.join(':').gsub(/(:0)+(?=:)/, ':')
     else
       raise 'unexpected address length of %{addr.length}'
     end
