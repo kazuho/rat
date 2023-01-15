@@ -271,13 +271,13 @@ class IP
     ~sum & 0xffff
   end
 
-  # fom RFC 3022 4.2; this function assumes 0 <= sum <= 65534
-  def self.checksum_adjust(sum, delta)
-    sum = 65535 - sum
+  # this function assumes 0 <= sum <= 65534
+  def self.checksum_adjust(checksum, delta)
     delta %= 65535
-    sum += delta
-    sum += sum >> 16
-    65535 - sum
+
+    mod65535 = 65534 - checksum
+    mod65535 = (mod65535 + delta) % 65535
+    65534 - mod65535
   end
 
   def self.addr_to_s(addr)
