@@ -27,7 +27,7 @@ class Nat
       return unless entry
 
       entry.packets_sent += 1
-      entry.bytes_sent += packet.bytes.length
+      entry.bytes_sent += packet.bytes.size
       packet.src_addr = @global_addr
       packet.l4.src_port = entry.global_port
     else
@@ -35,7 +35,7 @@ class Nat
       return unless entry
 
       entry.packets_received += 1
-      entry.bytes_received += packet.bytes.length
+      entry.bytes_received += packet.bytes.size
       packet.dest_addr = entry.local_addr
       packet.l4.dest_port = entry.local_port
     end
@@ -59,7 +59,7 @@ class Nat
     return if entry.nil?
 
     entry.packets_received += 1
-    entry.bytes_received += packet.bytes.length
+    entry.bytes_received += packet.bytes.size
     packet.l4.original.src_addr = entry.local_addr
     packet.l4.original.l4.src_port = entry.local_port
     packet.dest_addr = entry.local_addr

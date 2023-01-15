@@ -121,10 +121,10 @@ class NATTable
 
   def _insert(local_addr, local_port, global_port, remote_addr, remote_port)
     entry = Entry.new
-    entry.local_addr = local_addr
+    entry.local_addr = local_addr.dup
     entry.local_port = local_port
     entry.global_port = global_port
-    entry.remote_addr = remote_addr
+    entry.remote_addr = remote_addr.dup
     entry.remote_port = remote_port
 
     entry.link(@anchor)
@@ -154,6 +154,8 @@ class NATTable
 end
 
 class SymmetricNATTable < NATTable
+  ZERO_STR = "\0".b * (16 + 2) * 2
+
   def empty_port(remote_addr, remote_port)
     gc
     20.times do
@@ -164,23 +166,43 @@ class SymmetricNATTable < NATTable
   end
 
   def local_key_from_packet(packet)
-    packet.tuple + packet.l4.tuple
+    l3_tuple = packet.tuple
+    l3_tuple_size = l3_tuple.size
+
+    key = ZERO_STR.byteslice(0, l3_tuple_size + 4)
+    IO::Buffer.for(key) do |b|
+      b.copy(l3_tuple)
+      b.copy(packet.l4.tuple, l3_tuple_size)
+    end
+
+    key
   end
 
   def local_key_from_tuple(local_addr, local_port, remote_addr, remote_port)
-    local_addr + remote_addr + [local_port, remote_port].pack('n*')
+    local_addr.get_string + remote_addr.get_string + [local_port, remote_port].pack('n*')
   end
 
   def remote_key_from_packet(packet)
-    packet.src_addr + packet.l4.tuple
+    src_addr = packet.src_addr
+    addr_size = src_addr.size
+
+    key = ZERO_STR.byteslice(0, addr_size + 4)
+    IO::Buffer.for(key) do |b|
+      b.copy(src_addr)
+      b.copy(packet.l4.tuple, addr_size)
+    end
+
+    key
   end
 
   def remote_key_from_tuple(global_port, remote_addr, remote_port)
-    remote_addr + [remote_port, global_port].pack('n*')
+    remote_addr.get_string + [remote_port, global_port].pack('n*')
   end
 end
 
 class ConeNATTable < NATTable
+  ZERO_STR = "\0".b * (16 + 2)
+
   def empty_port(_remote_addr, _remote_port)
     gc
     @empty_ports = global_ports.dup if @empty_ports.nil?
@@ -195,11 +217,20 @@ class ConeNATTable < NATTable
   end
 
   def local_key_from_packet(packet)
-    packet.src_addr + [packet.l4.src_port].pack('n')
+    src_addr = packet.src_addr
+    addr_size = src_addr.size
+
+    key = ZERO_STR.byteslice(0, addr_size + 2)
+    IO::Buffer.for(key) do |b|
+      b.copy(src_addr)
+      b.set_value(:U16, addr_size, packet.l4.src_port)
+    end
+
+    key
   end
 
   def local_key_from_tuple(local_addr, local_port, _remote_addr, _remote_port)
-    local_addr + [local_port].pack('n')
+    local_addr.get_string + [local_port].pack('n')
   end
 
   def remote_key_from_packet(packet)

@@ -8,8 +8,8 @@
 
 require './tun'
 
-TRUE_ADDR = "\xa\1\2\xfe".b
-FAKE_ADDR = "\xa\1\2\4".b
+TRUE_ADDR = IO::Buffer.for("\xa\1\2\xfe".b)
+FAKE_ADDR = IO::Buffer.for("\xa\1\2\4".b)
 
 tun = Tun.new('rat')
 loop do
